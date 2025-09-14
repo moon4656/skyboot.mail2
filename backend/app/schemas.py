@@ -43,6 +43,12 @@ class AccessToken(BaseModel):
     token_type: str = "bearer"
 
 # 메일 관련 스키마
+class MailRequest(BaseModel):
+    """메일 발송 요청 스키마"""
+    to_email: EmailStr
+    subject: str
+    body: str
+
 class MailSend(BaseModel):
     """메일 발송 스키마"""
     to_email: EmailStr

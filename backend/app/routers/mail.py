@@ -15,6 +15,7 @@ import logging
 from datetime import datetime
 import asyncio
 import aiosmtplib
+import ssl
 
 router = APIRouter()
 
@@ -63,18 +64,24 @@ async def send_email_via_postfix(to_email: str, subject: str, body: str) -> tupl
         html_part = MIMEText(html_body, 'html', 'utf-8')
         msg.attach(html_part)
         
+        # SSL 컨텍스트 생성 (인증서 검증 비활성화)
+        tls_context = ssl.create_default_context()
+        tls_context.check_hostname = False
+        tls_context.verify_mode = ssl.CERT_NONE
+
         # 비동기 SMTP 연결 및 발송
         smtp_client = aiosmtplib.SMTP(
             hostname=settings.SMTP_HOST,
             port=settings.SMTP_PORT,
-            timeout=30
+            timeout=30,
+            tls_context=tls_context
         )
         
         await smtp_client.connect()
         
         # 인증이 필요한 경우
-        if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
-            await smtp_client.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+        if settings.SMTP_USER and settings.SMTP_PASSWORD:
+            await smtp_client.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
         
         # 메일 발송
         await smtp_client.send_message(msg)

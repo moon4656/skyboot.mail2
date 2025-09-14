@@ -8,7 +8,7 @@ services:
     environment:
       POSTGRES_DB: skyboot_mail
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
+      POSTGRES_PASSWORD: safe70!!
     ports:
       - "5432:5432"
     volumes:
@@ -24,11 +24,13 @@ services:
 
   # Postfix 메일 서버
   postfix:
-    image: catatnight/postfix:latest
+    image: boky/postfix:latest
     container_name: skyboot_postfix
     environment:
-      maildomain: localhost
-      smtp_user: admin:admin123
+      - POSTFIX_myhostname=localhost
+      - POSTFIX_mydomain=localhost
+      - POSTFIX_myorigin=localhost
+      - ALLOWED_SENDER_DOMAINS=localhost
     ports:
       - "25:25"
     volumes:

@@ -26,11 +26,12 @@ services:
 
   # Postfix 메일 서버
   postfix:
-    image: catatnight/postfix:latest
+    image: boky/postfix:latest
     container_name: skyboot_postfix_dev
     environment:
       maildomain: localhost
       smtp_user: admin:admin123
+      ALLOWED_SENDER_DOMAINS: localhost
     ports:
       - "25:25"
     volumes:
@@ -52,7 +53,12 @@ services:
     container_name: skyboot_backend_dev
     environment:
       # 데이터베이스 설정
-      DATABASE_URL: postgresql://postgres:postgres123@postgres:5432/skyboot_mail
+      DATABASE_URL: postgresql://postgres:safe70!!@postgres:5432/skyboot_mail
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: safe70!!
+      DB_NAME: skyboot_mail
       
       # JWT 설정
       SECRET_KEY: dev-secret-key-change-in-production
@@ -67,6 +73,7 @@ services:
       SMTP_PASSWORD: admin123
       SMTP_FROM_EMAIL: noreply@localhost
       SMTP_FROM_NAME: SkyBoot Mail Dev
+      MAIL_FROM: noreply@localhost
       
       # 애플리케이션 설정
       DEBUG: true

@@ -34,5 +34,10 @@ async def root():
 @app.get("/health")
 async def health_check():
     """헬스체크 엔드포인트"""
-    from datetime import datetime
-    return {"status": "healthy", "timestamp": datetime.utcnow()}
+    from datetime import datetime, timezone
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc)}
+
+if __name__ == "__main__":
+    """메인 실행 블록 - 개발용 서버 시작"""
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=9000)

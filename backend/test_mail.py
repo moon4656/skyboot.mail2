@@ -41,14 +41,9 @@ async def test_mail_sending():
     # 테스트 메일 정보
     test_emails = [
         {
-            "to_email": "test@example.com",
-            "subject": "SkyBoot Mail 테스트",
-            "body": "안녕하세요!\n\n이것은 SkyBoot Mail 시스템의 테스트 메일입니다.\n\n시스템이 정상적으로 작동하고 있습니다.\n\n감사합니다."
-        },
-        {
-            "to_email": "admin@localhost",
-            "subject": "시스템 알림 테스트",
-            "body": "시스템 관리자님께,\n\n메일 발송 시스템이 정상적으로 구동되었습니다.\n\n- 발송 시간: 테스트 중\n- 상태: 정상\n- 버전: 1.0.0\n\n시스템 관리팀"
+            "to_email": "testuser@skyboot.local",
+            "subject": "SkyBoot Mail 테스트 (to testuser)",
+            "body": "안녕하세요, testuser님!\n\n이것은 SkyBoot Mail 시스템의 테스트 메일입니다.\n\n시스템이 정상적으로 작동하고 있습니다.\n\n감사합니다."
         }
     ]
     
@@ -89,19 +84,26 @@ async def test_smtp_connection():
     
     try:
         import aiosmtplib
+        import ssl
+        
+        # SSL 컨텍스트 생성 (인증서 검증 비활성화)
+        tls_context = ssl.create_default_context()
+        tls_context.check_hostname = False
+        tls_context.verify_mode = ssl.CERT_NONE
         
         smtp_client = aiosmtplib.SMTP(
             hostname=settings.SMTP_HOST,
             port=settings.SMTP_PORT,
-            timeout=10
+            timeout=10,
+            tls_context=tls_context
         )
         
         await smtp_client.connect()
         print(f"✅ SMTP 서버 연결 성공: {settings.SMTP_HOST}:{settings.SMTP_PORT}")
         
         # 인증 테스트 (설정된 경우)
-        if settings.SMTP_USERNAME and settings.SMTP_PASSWORD:
-            await smtp_client.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+        if settings.SMTP_USER and settings.SMTP_PASSWORD:
+            await smtp_client.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             print("✅ SMTP 인증 성공")
         else:
             print("ℹ️  SMTP 인증 설정 없음 (인증 없이 발송)")
