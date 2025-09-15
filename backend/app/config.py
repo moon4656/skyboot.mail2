@@ -19,12 +19,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     
-    # SMTP 설정 (Postfix)
-    SMTP_HOST: str = "172.26.71.122"
-    SMTP_PORT: int = 25
-    SMTP_USER: Optional[str] = None
-    SMTP_PASSWORD: Optional[str] = None
-    SMTP_FROM_EMAIL: str = "noreply@skyboot.local"
+    # SMTP 설정 (Gmail for testing)
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = "test@gmail.com"  # 테스트용 - 실제 사용 시 변경 필요
+    SMTP_PASSWORD: Optional[str] = "test_password"  # 테스트용 - 실제 사용 시 변경 필요
+    SMTP_FROM_EMAIL: str = "test@gmail.com"
     SMTP_FROM_NAME: str = "SkyBoot Mail System"
     
     class Config:

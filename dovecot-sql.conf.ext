@@ -1,0 +1,20 @@
+# Database driver: mysql, pgsql, sqlite
+driver = pgsql
+
+# Database connection string
+connect = host=172.18.0.1 dbname=skybootmail user=postgres password=safe70!!
+
+# Default password scheme
+default_pass_scheme = PLAIN
+
+# Password query
+password_query = SELECT email as user, password FROM virtual_users WHERE email='%u';
+
+# User query for IMAP/POP3
+user_query = SELECT '/var/mail/vhosts/'||domain||'/'||email as home, \
+             'maildir:/var/mail/vhosts/'||domain||'/'||email as mail, \
+             150 AS uid, 8 AS gid \
+             FROM virtual_users WHERE email='%u';
+
+# User iteration query (for doveadm)
+iterate_query = SELECT email as username FROM virtual_users;

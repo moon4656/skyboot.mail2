@@ -108,11 +108,23 @@ skyboot.mail2/
 ### 백엔드 개발
 
 ```bash
+```bash
 cd backend
 
 # 가상환경 생성 및 활성화
+# Linux/Mac:
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate  
+
+# Windows PowerShell:
+# Python이 제대로 작동하지 않는 경우 python3.11.exe 사용
+python3.11.exe -m venv venv
+venv\Scripts\Activate.ps1
+
+# Windows CMD:
+venv\Scripts\activate.bat
+
+```
 
 # 의존성 설치
 pip install -r requirements.txt
@@ -387,5 +399,19 @@ docker-compose logs postfix
 
 # 또는 토큰을 URL에 직접 포함
 - git remote set-url origin https://[토큰]@github.com/moon4656/skyboot.core.git
+
+
+# 1. 로그인하여 토큰 받기
+- $loginResponse = Invoke-RestMethod -Uri "http://localhost:9000/auth/login" `
+    -Method POST `
+    -Headers @{"Content-Type"="application/json"} `
+    -Body '{"email":"demo@skyboot.co.kr","password":"demo123"}'
+
+# 2. 토큰을 사용하여 메일 발송
+- $token = $loginResponse.access_token
+- $mailResponse = Invoke-RestMethod -Uri "http://localhost:9000/mail/send" `
+    -Method POST `
+    -Headers @{"Authorization"="Bearer $token"; "Content-Type"="application/json"} `
+    -Body '{"to_email":"moon4656@gmail.com","subject":"테스트 메일","body":"안녕하세요, 테스트 메일입니다."}'
 
 **SkyBoot Mail** - 현대적이고 안정적인 메일 발송 솔루션 🚀

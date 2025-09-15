@@ -1,0 +1,5 @@
+user = postgres
+password = safe70!!
+hosts = 172.18.0.1
+dbname = skybootmail
+query = SELECT 1 FROM virtual_domains WHERE name='%s'

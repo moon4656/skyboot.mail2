@@ -1,0 +1,5 @@
+user = postgres
+password = safe70!!
+hosts = 172.18.0.1
+dbname = skybootmail
+query = SELECT destination FROM virtual_aliases WHERE source='%s'

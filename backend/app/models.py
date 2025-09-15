@@ -31,6 +31,7 @@ class MailLog(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False)
+    action = Column(String(50), nullable=False)  # send, receive, delete 등
     to_email = Column(String(255), nullable=False)
     subject = Column(String(500), nullable=False)
     body = Column(Text, nullable=False)
