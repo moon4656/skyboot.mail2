@@ -37,6 +37,9 @@ smtpd_relay_restrictions = permit_mynetworks permit_sasl_authenticated defer_una
 myhostname = mail.skyboot.local
 alias_maps = hash:/etc/aliases
 alias_database = hash:/etc/aliases
+
+mydomain = skyboot.local
+# 로컬에서 보내는 메일의 도메인 이름을 정의하는 설정
 myorigin = /etc/mailname
 mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain
 relayhost = 
@@ -45,5 +48,4 @@ mailbox_size_limit = 0
 recipient_delimiter = +
 inet_interfaces = all
 inet_protocols = ipv4
-mydomain = skyboot.local
 home_mailbox = Maildir/
