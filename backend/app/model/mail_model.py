@@ -1,10 +1,8 @@
 from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, LargeBinary
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
-
-Base = declarative_base()
+from ..database.base import Base
 
 class MailUser(Base):
     """

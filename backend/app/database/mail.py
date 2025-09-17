@@ -56,10 +56,9 @@ def create_tables():
     """
     try:
         # mail_models에서 모든 모델 임포트
-        from mail_models import (
-            MailUser, Mail, MailRecipient, MailAttachment,
-            MailFolder, MailInFolder, MailLog
-        )
+        from ..model.mail_model import (
+    MailUser, Mail, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog
+)
         
         # 테이블 생성
         Base.metadata.create_all(bind=engine)
@@ -88,7 +87,7 @@ def init_default_folders(db: Session, user_id: int):
         db: 데이터베이스 세션
         user_id: 사용자 ID
     """
-    from mail_models import MailFolder
+    from ..model.mail_model import MailFolder
     
     default_folders = [
         {"name": "받은편지함", "folder_type": "inbox", "is_system": True},

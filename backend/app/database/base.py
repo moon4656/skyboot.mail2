@@ -11,7 +11,11 @@ engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
     pool_recycle=300,
-    connect_args={"client_encoding": "utf8"}
+    connect_args={
+        "client_encoding": "utf8",
+        "options": "-c timezone=UTC"
+    },
+    echo=False
 )
 
 # 세션 로컬 클래스 생성

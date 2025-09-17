@@ -16,7 +16,7 @@ def get_test_client():
     """
     테스트용 FastAPI 클라이언트를 생성합니다.
     """
-    from mail_api import app
+    from app.routers.mail import app
     return TestClient(app)
 
 # 테스트 데이터
@@ -50,7 +50,7 @@ class TestMailAPI:
         """
         메일 발송 성공 테스트
         """
-        with patch('mail_api.get_current_user', return_value=TEST_USER):
+        with patch('app.routers.mail.get_current_user', return_value=TEST_USER):
             response = self.client.post(
                 "/api/mail/send",
                 data=TEST_MAIL_DATA,
@@ -65,7 +65,7 @@ class TestMailAPI:
         """
         필수 필드 누락 시 에러 테스트
         """
-        with patch('mail_api.get_current_user', return_value=TEST_USER):
+        with patch('app.routers.mail.get_current_user', return_value=TEST_USER):
             incomplete_data = {
                 "subject": "테스트 메일"
                 # to_emails와 content 누락
@@ -83,7 +83,7 @@ class TestMailAPI:
         """
         받은 메일 목록 조회 테스트
         """
-        with patch('mail_api.get_current_user', return_value=TEST_USER):
+        with patch('app.routers.mail.get_current_user', return_value=TEST_USER):
             response = self.client.get(
                 "/api/mail/inbox",
                 headers=self.headers
@@ -96,7 +96,7 @@ class TestMailAPI:
         """
         페이지네이션을 포함한 받은 메일 목록 조회 테스트
         """
-        with patch('mail_api.get_current_user', return_value=TEST_USER):
+        with patch('app.routers.mail.get_current_user', return_value=TEST_USER):
             response = self.client.get(
                 "/api/mail/inbox?page=1&limit=10",
                 headers=self.headers
@@ -108,7 +108,7 @@ class TestMailAPI:
         """
         보낸 메일 목록 조회 테스트
         """
-        with patch('mail_api.get_current_user', return_value=TEST_USER):
+        with patch('app.routers.mail.get_current_user', return_value=TEST_USER):
             response = self.client.get(
                 "/api/mail/sent",
                 headers=self.headers
@@ -120,7 +120,7 @@ class TestMailAPI:
         """
         임시보관함 메일 목록 조회 테스트
         """
-        with patch('mail_api.get_current_user', return_value=TEST_USER):
+        with patch('app.routers.mail.get_current_user', return_value=TEST_USER):
             response = self.client.get(
                 "/api/mail/drafts",
                 headers=self.headers
@@ -132,7 +132,7 @@ class TestMailAPI:
         """
         메일 통계 조회 테스트
         """
-        with patch('mail_api.get_current_user', return_value=TEST_USER):
+        with patch('app.routers.mail.get_current_user', return_value=TEST_USER):
             response = self.client.get(
                 "/api/mail/stats",
                 headers=self.headers
@@ -151,7 +151,7 @@ class TestMailAPI:
         """
         존재하지 않는 메일 ID로 접근 시 에러 테스트
         """
-        with patch('mail_api.get_current_user', return_value=TEST_USER):
+        with patch('app.routers.mail.get_current_user', return_value=TEST_USER):
             response = self.client.get(
                 "/api/mail/inbox/invalid-mail-id",
                 headers=self.headers

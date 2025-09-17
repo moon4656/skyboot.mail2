@@ -16,11 +16,10 @@ import logging
 import mimetypes
 from pathlib import Path
 
-from mail_models import (
-    Mail, MailUser, MailRecipient, MailAttachment, 
-    MailFolder, MailInFolder, MailLog
+from ..model.mail_model import (
+    Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog
 )
-from mail_schemas import (
+from ..schemas.mail_schema import (
     MailCreate, MailUpdate, RecipientBase, MailStatus,
     MailPriority, RecipientType, PaginationParams,
     MailSearchParams, SendMailResult

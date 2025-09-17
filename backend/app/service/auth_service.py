@@ -5,9 +5,9 @@ from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from app.config import settings
-from app.database import get_db
-from app.models import User, RefreshToken
+from ..config import settings
+from ..database.base import get_db
+from ..model.base_model import User, RefreshToken
 
 # 패스워드 해싱 컨텍스트
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -69,7 +69,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     if payload is None:
         raise credentials_exception
     
-    user_id: int = payload.get("sub")
+    user_id: str = payload.get("sub")
     if user_id is None:
         raise credentials_exception
     

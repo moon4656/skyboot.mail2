@@ -123,6 +123,11 @@ class MailResponse(MailBase):
     class Config:
         from_attributes = True
 
+class MailDetailResponse(MailResponse):
+    """메일 상세 응답 스키마"""
+    # MailResponse의 모든 필드를 상속받음
+    pass
+
 class MailListResponse(BaseModel):
     """메일 목록 응답 스키마"""
     id: int
@@ -168,7 +173,7 @@ class PaginationParams(BaseModel):
     page: int = Field(1, ge=1, description="페이지 번호")
     size: int = Field(20, ge=1, le=100, description="페이지 크기")
     sort_by: str = Field("created_at", description="정렬 기준")
-    sort_order: str = Field("desc", regex="^(asc|desc)$", description="정렬 순서")
+    sort_order: str = Field("desc", pattern="^(asc|desc)$", description="정렬 순서")
 
 class PaginatedResponse(BaseModel):
     """페이지네이션 응답 스키마"""
@@ -217,6 +222,58 @@ class SendMailResult(BaseModel):
     message: str = Field(..., description="결과 메시지")
     failed_recipients: List[str] = Field(default_factory=list, description="발송 실패 수신자")
 
+# 메일 발송 요청/응답 스키마
+class MailSendRequest(BaseModel):
+    """메일 발송 요청 스키마"""
+    to: List[EmailStr] = Field(..., description="수신자 목록")
+    cc: Optional[List[EmailStr]] = Field(None, description="참조 수신자 목록")
+    bcc: Optional[List[EmailStr]] = Field(None, description="숨은 참조 수신자 목록")
+    subject: str = Field(..., max_length=500, description="메일 제목")
+    body_text: Optional[str] = Field(None, description="메일 본문 (텍스트)")
+    body_html: Optional[str] = Field(None, description="메일 본문 (HTML)")
+    priority: MailPriority = Field(MailPriority.NORMAL, description="우선순위")
+    is_draft: bool = Field(False, description="임시보관함 여부")
+
+class MailSendResponse(BaseModel):
+    """메일 발송 응답 스키마"""
+    success: bool = Field(..., description="발송 성공 여부")
+    mail_uuid: str = Field(..., description="메일 UUID")
+    message: str = Field(..., description="응답 메시지")
+    sent_at: Optional[datetime] = Field(None, description="발송 시간")
+    failed_recipients: List[str] = Field(default_factory=list, description="발송 실패 수신자")
+
+# 메일 검색 요청/응답 스키마
+class MailSearchRequest(BaseModel):
+    """메일 검색 요청 스키마"""
+    query: Optional[str] = Field(None, description="검색어")
+    sender_email: Optional[str] = Field(None, description="발신자 이메일")
+    recipient_email: Optional[str] = Field(None, description="수신자 이메일")
+    subject: Optional[str] = Field(None, description="제목 검색")
+    status: Optional[MailStatus] = Field(None, description="메일 상태")
+    priority: Optional[MailPriority] = Field(None, description="우선순위")
+    date_from: Optional[datetime] = Field(None, description="시작 날짜")
+    date_to: Optional[datetime] = Field(None, description="종료 날짜")
+    page: int = Field(1, ge=1, description="페이지 번호")
+    limit: int = Field(20, ge=1, le=100, description="페이지당 항목 수")
+
+class MailSearchResponse(BaseModel):
+    """메일 검색 응답 스키마"""
+    mails: List[MailListResponse] = Field(..., description="검색된 메일 목록")
+    total: int = Field(..., description="총 검색 결과 수")
+    page: int = Field(..., description="현재 페이지")
+    limit: int = Field(..., description="페이지당 항목 수")
+    total_pages: int = Field(..., description="총 페이지 수")
+
+# 페이지네이션 응답 스키마
+class PaginationResponse(BaseModel):
+    """페이지네이션 응답 스키마"""
+    page: int = Field(..., description="현재 페이지")
+    limit: int = Field(..., description="페이지당 항목 수")
+    total: int = Field(..., description="총 항목 수")
+    total_pages: int = Field(..., description="총 페이지 수")
+    has_next: bool = Field(..., description="다음 페이지 존재 여부")
+    has_prev: bool = Field(..., description="이전 페이지 존재 여부")
+
 # 통계 스키마
 class MailStats(BaseModel):
     """메일 통계 스키마"""
@@ -226,3 +283,9 @@ class MailStats(BaseModel):
     unread_count: int = Field(..., description="읽지 않은 메일 수")
     today_sent: int = Field(..., description="오늘 발송 메일 수")
     today_received: int = Field(..., description="오늘 수신 메일 수")
+
+class MailStatsResponse(BaseModel):
+    """메일 통계 응답 스키마"""
+    stats: MailStats = Field(..., description="메일 통계")
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("통계 조회 성공", description="응답 메시지")

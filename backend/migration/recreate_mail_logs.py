@@ -5,7 +5,7 @@ mail_logs 테이블 재생성 스크립트
 """
 
 from app.database import engine
-from app.models import Base, MailLog
+from app.model.mail_model import Base, MailLog
 from sqlalchemy import text
 
 def recreate_mail_logs_table():
