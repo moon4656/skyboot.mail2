@@ -1,0 +1,103 @@
+{
+  "timestamp": "2025-09-18T11:56:15.958772",
+  "total_tests": 11,
+  "passed_tests": 11,
+  "failed_tests": 0,
+  "results": [
+    {
+      "test_name": "로그인 및 토큰 획득",
+      "success": true,
+      "response_data": {
+        "token_acquired": true
+      },
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:18.287426"
+    },
+    {
+      "test_name": "메일 검색",
+      "success": true,
+      "response_data": {
+        "total_found": 0
+      },
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:28.401548"
+    },
+    {
+      "test_name": "메일 통계 조회",
+      "success": true,
+      "response_data": {},
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:30.467651"
+    },
+    {
+      "test_name": "읽지 않은 메일 조회",
+      "success": true,
+      "response_data": {
+        "total": 0
+      },
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:32.523517"
+    },
+    {
+      "test_name": "중요 표시된 메일 조회",
+      "success": true,
+      "response_data": {
+        "total": 0
+      },
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:34.610924"
+    },
+    {
+      "test_name": "메일 읽음 처리",
+      "success": true,
+      "response_data": {
+        "mail_id": "a59027c4-c588-4310-97a1-bf4c876eba5b"
+      },
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:36.683971"
+    },
+    {
+      "test_name": "메일 읽지 않음 처리",
+      "success": true,
+      "response_data": {
+        "mail_id": "a59027c4-c588-4310-97a1-bf4c876eba5b"
+      },
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:38.746071"
+    },
+    {
+      "test_name": "모든 메일 읽음 처리",
+      "success": true,
+      "response_data": {},
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:40.815853"
+    },
+    {
+      "test_name": "메일 중요 표시",
+      "success": true,
+      "response_data": {
+        "mail_id": "a59027c4-c588-4310-97a1-bf4c876eba5b"
+      },
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:42.860433"
+    },
+    {
+      "test_name": "메일 중요 표시 해제",
+      "success": true,
+      "response_data": {
+        "mail_id": "a59027c4-c588-4310-97a1-bf4c876eba5b"
+      },
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:44.929613"
+    },
+    {
+      "test_name": "검색 자동완성",
+      "success": true,
+      "response_data": {
+        "suggestions_count": 0
+      },
+      "error_message": null,
+      "timestamp": "2025-09-18T11:56:47.004600"
+    }
+  ]
+}

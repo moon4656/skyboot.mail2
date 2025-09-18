@@ -17,7 +17,7 @@ from ..config import settings
 router = APIRouter()
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+async def register(user_data: UserCreate, db: Session = Depends(get_db)):
     """회원가입 엔드포인트"""
     
     # 이메일 중복 확인

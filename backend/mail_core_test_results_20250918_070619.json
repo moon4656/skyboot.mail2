@@ -1,0 +1,65 @@
+[
+  {
+    "test_name": "인증 없는 접근 차단",
+    "success": false,
+    "details": "예상과 다른 응답: HTTP 403",
+    "timestamp": "2025-09-18T07:06:04.205037",
+    "response_data": "{\"detail\":\"Not authenticated\"}"
+  },
+  {
+    "test_name": "기본 메일 발송",
+    "success": false,
+    "details": "HTTP 422",
+    "timestamp": "2025-09-18T07:06:06.256126",
+    "response_data": "{\"detail\":[{\"type\":\"enum\",\"loc\":[\"body\",\"priority\"],\"msg\":\"Input should be 'high', 'normal' or 'low'\",\"input\":\"NORMAL\",\"ctx\":{\"expected\":\"'high', 'normal' or 'low'\"}}]}"
+  },
+  {
+    "test_name": "CC, BCC 포함 메일 발송",
+    "success": false,
+    "details": "HTTP 422",
+    "timestamp": "2025-09-18T07:06:08.312279",
+    "response_data": "{\"detail\":[{\"type\":\"enum\",\"loc\":[\"body\",\"priority\"],\"msg\":\"Input should be 'high', 'normal' or 'low'\",\"input\":\"HIGH\",\"ctx\":{\"expected\":\"'high', 'normal' or 'low'\"}}]}"
+  },
+  {
+    "test_name": "필수 필드 누락 (제목)",
+    "success": true,
+    "details": "예상된 422 Validation Error",
+    "timestamp": "2025-09-18T07:06:10.364636",
+    "response_data": 422
+  },
+  {
+    "test_name": "보낸 메일함 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:06:13.426189",
+    "response_data": "{\"detail\":\"보낸 메일함 조회 중 오류가 발생했습니다: 1 validation error for MailListWithPaginationResponse\\nmails\\n  Field required [type=missing, input_value={'success': True, 'data':...=False, has_prev=False)}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.5/v/missing\"}"
+  },
+  {
+    "test_name": "보낸 메일 상세 조회",
+    "success": false,
+    "details": "테스트할 메일 ID가 없음",
+    "timestamp": "2025-09-18T07:06:13.427371",
+    "response_data": null
+  },
+  {
+    "test_name": "받은 메일함 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:06:15.495892",
+    "response_data": "{\"detail\":\"받은 메일함 조회 중 오류가 발생했습니다: 404: Inbox folder not found\"}"
+  },
+  {
+    "test_name": "임시보관함 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:06:17.534658",
+    "response_data": "{\"detail\":\"임시보관함 조회 중 오류가 발생했습니다: 1 validation error for MailListWithPaginationResponse\\nmails\\n  Field required [type=missing, input_value={'success': True, 'data':...=False, has_prev=False)}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.5/v/missing\"}"
+  },
+  {
+    "test_name": "휴지통 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:06:19.610325",
+    "response_data": "{\"detail\":\"휴지통 조회 중 오류가 발생했습니다: 404: Trash folder not found\"}"
+  }
+]

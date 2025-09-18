@@ -14,7 +14,7 @@ class UserCreate(UserBase):
 
 class UserResponse(UserBase):
     """사용자 응답 스키마"""
-    id: int
+    id: str
     is_active: bool
     created_at: datetime
     

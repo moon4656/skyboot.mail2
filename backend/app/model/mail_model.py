@@ -11,6 +11,7 @@ class MailUser(Base):
     __tablename__ = "mail_users"
     
     id = Column(Integer, primary_key=True, index=True, comment="사용자 고유 ID")
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True, comment="연결된 사용자 ID")
     user_uuid = Column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()), comment="사용자 UUID")
     email = Column(String(255), unique=True, index=True, nullable=False, comment="이메일 주소")
     password_hash = Column(String(255), nullable=False, comment="암호화된 비밀번호")

@@ -10,19 +10,18 @@ import sys
 import os
 from pathlib import Path
 
-# 현재 디렉토리를 Python 경로에 추가
-current_dir = Path(__file__).parent
-sys.path.insert(0, str(current_dir))
+# backend 폴더를 sys.path에 추가
+backend_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(backend_dir))
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 import logging
 
-# mail_models에서 Base와 모든 모델 클래스 import
-from mail_models import (
-    Base, MailUser, Mail, MailRecipient, MailAttachment,
-    MailFolder, MailInFolder, MailLog
-)
+# app.model에서 Base와 모든 모델 클래스 import
+from app.database.base import Base
+from app.model.mail_model import MailUser, Mail, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog
+from app.model.base_model import User, RefreshToken
 
 # 로깅 설정
 logging.basicConfig(
@@ -38,7 +37,7 @@ logger = logging.getLogger(__name__)
 # 데이터베이스 연결 설정
 DATABASE_URL = os.getenv(
     "MAIL_DATABASE_URL",
-    "postgresql://postgres:safe70!!@localhost:5432/skybootmail"
+    "postgresql://postgres:safe70!!@localhost:5432/skyboot.mail"
 )
 
 def check_database_connection(engine):
@@ -102,7 +101,7 @@ def create_tables(engine):
         # 생성할 테이블 목록
         tables_to_create = [
             'mail_users', 'mails', 'mail_recipients', 'mail_attachments',
-            'mail_folders', 'mail_in_folders', 'mail_logs'
+            'mail_folders', 'mail_in_folders', 'mail_logs', 'users', 'refresh_tokens'
         ]
         
         # 모든 테이블 생성

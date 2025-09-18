@@ -1,0 +1,105 @@
+[
+  {
+    "test_name": "인증 없는 접근 차단",
+    "success": true,
+    "details": "예상된 인증 오류: HTTP 403",
+    "timestamp": "2025-09-18T07:20:06.621432",
+    "response_data": 403
+  },
+  {
+    "test_name": "기본 메일 발송",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:20:08.708662",
+    "response_data": "{\"detail\":\"메일 발송 중 오류가 발생했습니다: (psycopg2.errors.InvalidTextRepresentation) 오류:  integer 자료형 대한 잘못된 입력: \\\"7b508059-2d6e-4900-9849-f1ecef2260ae\\\"\\nLINE 1: ...s_draft, sent_at, created_at, updated_at) VALUES ('7b508059-...\\n                                                             ^\\n\\n[SQL: INSERT INTO mails (id, mail_uuid, sender_id, subject, body_text, body_html, priority, status, is_draft, sent_at, created_at, updated_at) VALUES (%(id)s, %(mail_uuid)s, %(sender_id)s, %(subject)s, %(body_text)s, %(body_html)s, %(priority)s, %(status)s, %(is_draft)s, %(sent_at)s, %(created_at)s, %(updated_at)s)]\\n[parameters: {'id': '7b508059-2d6e-4900-9849-f1ecef2260ae', 'mail_uuid': '84e7dcc8-1545-493d-99eb-7d75a33f35ce', 'sender_id': 2, 'subject': '테스트 메일', 'body_text': '이것은 테스트 메일입니다.', 'body_html': None, 'priority': <MailPriority.NORMAL: 'normal'>, 'status': <MailStatus.SENT: 'sent'>, 'is_draft': True, 'sent_at': datetime.datetime(2025, 9, 17, 22, 20, 8, 688252), 'created_at': datetime.datetime(2025, 9, 17, 22, 20, 8, 688252), 'updated_at': datetime.datetime(2025, 9, 17, 22, 20, 8, 690405)}]\\n(Background on this error at: https://sqlalche.me/e/20/9h9h)\"}"
+  },
+  {
+    "test_name": "CC, BCC 포함 메일 발송",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:20:10.782454",
+    "response_data": "{\"detail\":\"메일 발송 중 오류가 발생했습니다: (psycopg2.errors.InvalidTextRepresentation) 오류:  integer 자료형 대한 잘못된 입력: \\\"ed3193d8-ff8f-469d-9071-cde2660a5e0d\\\"\\nLINE 1: ...s_draft, sent_at, created_at, updated_at) VALUES ('ed3193d8-...\\n                                                             ^\\n\\n[SQL: INSERT INTO mails (id, mail_uuid, sender_id, subject, body_text, body_html, priority, status, is_draft, sent_at, created_at, updated_at) VALUES (%(id)s, %(mail_uuid)s, %(sender_id)s, %(subject)s, %(body_text)s, %(body_html)s, %(priority)s, %(status)s, %(is_draft)s, %(sent_at)s, %(created_at)s, %(updated_at)s)]\\n[parameters: {'id': 'ed3193d8-ff8f-469d-9071-cde2660a5e0d', 'mail_uuid': '9b3e873c-f0b2-436e-ba0f-4a50a4e20e67', 'sender_id': 2, 'subject': 'CC, BCC 테스트 메일', 'body_text': '이것은 CC, BCC가 포함된 테스트 메일입니다.', 'body_html': None, 'priority': <MailPriority.HIGH: 'high'>, 'status': <MailStatus.SENT: 'sent'>, 'is_draft': True, 'sent_at': datetime.datetime(2025, 9, 17, 22, 20, 10, 782454), 'created_at': datetime.datetime(2025, 9, 17, 22, 20, 10, 782454), 'updated_at': datetime.datetime(2025, 9, 17, 22, 20, 10, 782454)}]\\n(Background on this error at: https://sqlalche.me/e/20/9h9h)\"}"
+  },
+  {
+    "test_name": "필수 필드 누락 (제목)",
+    "success": true,
+    "details": "예상된 422 Validation Error",
+    "timestamp": "2025-09-18T07:20:12.834294",
+    "response_data": 422
+  },
+  {
+    "test_name": "보낸 메일함 조회",
+    "success": true,
+    "details": "메일 수: 0, 총 개수: 0",
+    "timestamp": "2025-09-18T07:20:15.878824",
+    "response_data": {
+      "mail_count": 0,
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0,
+        "has_next": false,
+        "has_prev": false
+      }
+    }
+  },
+  {
+    "test_name": "보낸 메일 상세 조회",
+    "success": false,
+    "details": "테스트할 메일 ID가 없음",
+    "timestamp": "2025-09-18T07:20:15.883874",
+    "response_data": null
+  },
+  {
+    "test_name": "받은 메일함 조회",
+    "success": true,
+    "details": "메일 수: 0, 총 개수: 0",
+    "timestamp": "2025-09-18T07:20:17.978215",
+    "response_data": {
+      "mail_count": 0,
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0,
+        "has_next": false,
+        "has_prev": false
+      }
+    }
+  },
+  {
+    "test_name": "임시보관함 조회",
+    "success": true,
+    "details": "임시보관 메일 수: 0, 총 개수: 0",
+    "timestamp": "2025-09-18T07:20:20.028864",
+    "response_data": {
+      "draft_count": 0,
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0,
+        "has_next": false,
+        "has_prev": false
+      }
+    }
+  },
+  {
+    "test_name": "휴지통 조회",
+    "success": true,
+    "details": "삭제된 메일 수: 0, 총 개수: 0",
+    "timestamp": "2025-09-18T07:20:22.072582",
+    "response_data": {
+      "trash_count": 0,
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0,
+        "has_next": false,
+        "has_prev": false
+      }
+    }
+  }
+]

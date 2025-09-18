@@ -1,0 +1,105 @@
+[
+  {
+    "test_name": "인증 없는 접근 차단",
+    "success": false,
+    "details": "예상과 다른 응답: HTTP 403",
+    "timestamp": "2025-09-18T07:08:01.327980",
+    "response_data": "{\"detail\":\"Not authenticated\"}"
+  },
+  {
+    "test_name": "기본 메일 발송",
+    "success": false,
+    "details": "HTTP 422",
+    "timestamp": "2025-09-18T07:08:03.389221",
+    "response_data": "{\"detail\":[{\"type\":\"enum\",\"loc\":[\"body\",\"priority\"],\"msg\":\"Input should be 'high', 'normal' or 'low'\",\"input\":\"NORMAL\",\"ctx\":{\"expected\":\"'high', 'normal' or 'low'\"}}]}"
+  },
+  {
+    "test_name": "CC, BCC 포함 메일 발송",
+    "success": false,
+    "details": "HTTP 422",
+    "timestamp": "2025-09-18T07:08:05.459740",
+    "response_data": "{\"detail\":[{\"type\":\"enum\",\"loc\":[\"body\",\"priority\"],\"msg\":\"Input should be 'high', 'normal' or 'low'\",\"input\":\"HIGH\",\"ctx\":{\"expected\":\"'high', 'normal' or 'low'\"}}]}"
+  },
+  {
+    "test_name": "필수 필드 누락 (제목)",
+    "success": true,
+    "details": "예상된 422 Validation Error",
+    "timestamp": "2025-09-18T07:08:07.520581",
+    "response_data": 422
+  },
+  {
+    "test_name": "보낸 메일함 조회",
+    "success": false,
+    "details": "응답에서 success=False",
+    "timestamp": "2025-09-18T07:08:10.633994",
+    "response_data": {
+      "mails": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0,
+        "has_next": false,
+        "has_prev": false
+      }
+    }
+  },
+  {
+    "test_name": "보낸 메일 상세 조회",
+    "success": false,
+    "details": "테스트할 메일 ID가 없음",
+    "timestamp": "2025-09-18T07:08:10.633994",
+    "response_data": null
+  },
+  {
+    "test_name": "받은 메일함 조회",
+    "success": false,
+    "details": "응답에서 success=False",
+    "timestamp": "2025-09-18T07:08:12.717143",
+    "response_data": {
+      "mails": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0,
+        "has_next": false,
+        "has_prev": false
+      }
+    }
+  },
+  {
+    "test_name": "임시보관함 조회",
+    "success": false,
+    "details": "응답에서 success=False",
+    "timestamp": "2025-09-18T07:08:14.764263",
+    "response_data": {
+      "mails": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0,
+        "has_next": false,
+        "has_prev": false
+      }
+    }
+  },
+  {
+    "test_name": "휴지통 조회",
+    "success": false,
+    "details": "응답에서 success=False",
+    "timestamp": "2025-09-18T07:08:16.839834",
+    "response_data": {
+      "mails": [],
+      "pagination": {
+        "page": 1,
+        "limit": 20,
+        "total": 0,
+        "total_pages": 0,
+        "has_next": false,
+        "has_prev": false
+      }
+    }
+  }
+]

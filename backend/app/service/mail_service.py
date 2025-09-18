@@ -409,6 +409,97 @@ class MailService:
         
         return mails, total
     
+    def get_draft_mail_detail(self, db: Session, mail_id: int, user_id: int) -> Optional[Mail]:
+        """
+        임시보관함의 특정 메일 상세 정보를 조회합니다.
+
+        Args:
+            db: 데이터베이스 세션
+            mail_id: 메일 ID
+            user_id: 사용자 ID
+
+        Returns:
+            Optional[Mail]: 메일 객체 또는 None
+        """
+        mail = db.query(Mail).filter(
+            Mail.id == mail_id,
+            Mail.sender_id == user_id,
+            Mail.is_draft == True
+        ).first()
+
+        return mail
+
+    def get_deleted_mails(self, db: Session, user_uuid: str,
+                           pagination: PaginationParams,
+                           search: Optional[MailSearchParams] = None) -> Tuple[List[Mail], int]:
+        """
+        휴지통 메일 목록을 조회합니다.
+
+        Args:
+            db: 데이터베이스 세션
+            user_uuid: 사용자 UUID
+            pagination: 페이지네이션 매개변수
+            search: 검색 매개변수
+
+        Returns:
+            Tuple[List[Mail], int]: (메일 목록, 전체 개수)
+        """
+        user = db.query(MailUser).filter(MailUser.user_uuid == user_uuid).first()
+        if not user:
+            return [], 0
+
+        query = db.query(Mail).join(MailRecipient).filter(
+            MailRecipient.recipient_id == user.id,
+            MailRecipient.is_deleted == True
+        )
+
+        # 검색 조건 적용
+        if search:
+            query = self._apply_search_filters(query, search)
+
+        # 전체 개수
+        total = query.count()
+
+        # 정렬
+        sort_column = getattr(Mail, pagination.sort_by, Mail.sent_at)
+        if pagination.sort_order == "desc":
+            query = query.order_by(desc(sort_column))
+        else:
+            query = query.order_by(asc(sort_column))
+
+        # 페이지네이션
+        offset = (pagination.page - 1) * pagination.size
+        mails = query.offset(offset).limit(pagination.size).all()
+
+        return mails, total
+
+    def get_deleted_mail_detail(self, db: Session, mail_id: str, user_uuid: str) -> Optional[Mail]:
+        """
+        휴지통의 특정 메일 상세 정보를 조회합니다.
+
+        Args:
+            db: 데이터베이스 세션
+            mail_id: 메일 ID (UUID 또는 int)
+            user_uuid: 사용자 UUID
+
+        Returns:
+            Optional[Mail]: 메일 객체 또는 None
+        """
+        user = db.query(MailUser).filter(MailUser.user_uuid == user_uuid).first()
+        if not user:
+            return None
+
+        # mail_id가 int 형식인지 UUID 형식인지 확인하여 쿼리 필터 설정
+        mail_query_filter = Mail.id == mail_id if str(mail_id).isdigit() else Mail.mail_uuid == mail_id
+
+        mail = db.query(Mail).join(MailRecipient).filter(
+            mail_query_filter,
+            MailRecipient.recipient_id == user.id,
+            MailRecipient.is_deleted == True
+        ).first()
+
+        return mail
+
     def get_mail_detail(self, db: Session, mail_id: int, user_id: int) -> Optional[Mail]:
         """
         메일 상세 정보를 조회합니다.

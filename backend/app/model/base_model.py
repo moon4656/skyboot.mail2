@@ -8,6 +8,7 @@ class User(Base):
     __tablename__ = "users"
     
     id = Column(String(36), primary_key=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_uuid = Column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()))
     email = Column(String(255), unique=True, index=True, nullable=False)
     username = Column(String(100), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)

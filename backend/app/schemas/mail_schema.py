@@ -42,7 +42,7 @@ class MailUserCreate(MailUserBase):
 
 class MailUserResponse(MailUserBase):
     """메일 사용자 응답 스키마"""
-    id: int
+    id: str
     user_uuid: str
     created_at: datetime
     updated_at: datetime
@@ -273,6 +273,12 @@ class PaginationResponse(BaseModel):
     total_pages: int = Field(..., description="총 페이지 수")
     has_next: bool = Field(..., description="다음 페이지 존재 여부")
     has_prev: bool = Field(..., description="이전 페이지 존재 여부")
+
+# 메일 목록과 페이지네이션을 포함하는 응답 스키마
+class MailListWithPaginationResponse(BaseModel):
+    """메일 목록과 페이지네이션 응답 스키마"""
+    mails: List[MailListResponse] = Field(..., description="메일 목록")
+    pagination: PaginationResponse = Field(..., description="페이지네이션 정보")
 
 # 통계 스키마
 class MailStats(BaseModel):

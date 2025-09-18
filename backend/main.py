@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.router.auth_router import router as auth_router
-from app.router.mail_router import router as mail_router
+from app.router.mail_core_router import router as mail_core_router
+from app.router.mail_convenience_router import router as mail_convenience_router
+from app.router.mail_advanced_router import router as mail_advanced_router
 from app.database.base import engine
 from app.model.base_model import Base
 from app.logging_config import setup_logging, get_logger
@@ -36,7 +38,9 @@ logger.info("🌐 CORS 미들웨어 설정 완료")
 
 # 라우터 등록
 app.include_router(auth_router, prefix="/auth", tags=["authentication"])
-app.include_router(mail_router, prefix="/mail", tags=["mail"])
+app.include_router(mail_core_router, prefix="/mail", tags=["mail-core"])
+app.include_router(mail_convenience_router, prefix="/mail", tags=["mail-convenience"])
+app.include_router(mail_advanced_router, prefix="/mail", tags=["mail-advanced"])
 logger.info("📡 API 라우터 등록 완료")
 
 @app.get("/")

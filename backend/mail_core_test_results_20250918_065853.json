@@ -1,0 +1,65 @@
+[
+  {
+    "test_name": "인증 없는 접근 차단",
+    "success": false,
+    "details": "예상과 다른 응답: HTTP 403",
+    "timestamp": "2025-09-18T06:58:37.652175",
+    "response_data": "{\"detail\":\"Not authenticated\"}"
+  },
+  {
+    "test_name": "기본 메일 발송",
+    "success": false,
+    "details": "HTTP 422",
+    "timestamp": "2025-09-18T06:58:39.708648",
+    "response_data": "{\"detail\":[{\"type\":\"enum\",\"loc\":[\"body\",\"priority\"],\"msg\":\"Input should be 'high', 'normal' or 'low'\",\"input\":\"NORMAL\",\"ctx\":{\"expected\":\"'high', 'normal' or 'low'\"}}]}"
+  },
+  {
+    "test_name": "CC, BCC 포함 메일 발송",
+    "success": false,
+    "details": "HTTP 422",
+    "timestamp": "2025-09-18T06:58:41.775415",
+    "response_data": "{\"detail\":[{\"type\":\"enum\",\"loc\":[\"body\",\"priority\"],\"msg\":\"Input should be 'high', 'normal' or 'low'\",\"input\":\"HIGH\",\"ctx\":{\"expected\":\"'high', 'normal' or 'low'\"}}]}"
+  },
+  {
+    "test_name": "필수 필드 누락 (제목)",
+    "success": true,
+    "details": "예상된 422 Validation Error",
+    "timestamp": "2025-09-18T06:58:43.829768",
+    "response_data": 422
+  },
+  {
+    "test_name": "보낸 메일함 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T06:58:46.901595",
+    "response_data": "{\"detail\":\"보낸 메일함 조회 중 오류가 발생했습니다: type object 'MailUser' has no attribute 'user_id'\"}"
+  },
+  {
+    "test_name": "보낸 메일 상세 조회",
+    "success": false,
+    "details": "테스트할 메일 ID가 없음",
+    "timestamp": "2025-09-18T06:58:46.901595",
+    "response_data": null
+  },
+  {
+    "test_name": "받은 메일함 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T06:58:48.965669",
+    "response_data": "{\"detail\":\"받은 메일함 조회 중 오류가 발생했습니다: type object 'MailUser' has no attribute 'user_id'\"}"
+  },
+  {
+    "test_name": "임시보관함 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T06:58:51.017394",
+    "response_data": "{\"detail\":\"임시보관함 조회 중 오류가 발생했습니다: type object 'MailUser' has no attribute 'user_id'\"}"
+  },
+  {
+    "test_name": "휴지통 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T06:58:53.081031",
+    "response_data": "{\"detail\":\"휴지통 조회 중 오류가 발생했습니다: type object 'MailUser' has no attribute 'user_id'\"}"
+  }
+]

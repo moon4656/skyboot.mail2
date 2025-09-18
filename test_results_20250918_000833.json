@@ -1,0 +1,226 @@
+[
+  {
+    "endpoint": "/mail/inbox",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:07:37.625987"
+  },
+  {
+    "endpoint": "/mail/inbox/test-mail-id",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:07:39.703777"
+  },
+  {
+    "endpoint": "/mail/inbox/test-mail-id/read",
+    "method": "PUT",
+    "status_code": 404,
+    "success": false,
+    "error_msg": "HTTP 404: {\"detail\":\"Not Found\"}",
+    "timestamp": "2025-09-18T00:07:41.761950"
+  },
+  {
+    "endpoint": "/mail/inbox/test-mail-id/unread",
+    "method": "PUT",
+    "status_code": 404,
+    "success": false,
+    "error_msg": "HTTP 404: {\"detail\":\"Not Found\"}",
+    "timestamp": "2025-09-18T00:07:43.827875"
+  },
+  {
+    "endpoint": "/mail/sent",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:07:45.890491"
+  },
+  {
+    "endpoint": "/mail/sent/test-mail-id",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:07:47.929462"
+  },
+  {
+    "endpoint": "/mail/send",
+    "method": "POST",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:07:49.992701"
+  },
+  {
+    "endpoint": "/mail/drafts",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:07:52.067067"
+  },
+  {
+    "endpoint": "/mail/drafts",
+    "method": "POST",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:07:54.134950"
+  },
+  {
+    "endpoint": "/mail/drafts/test-draft-id",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:07:56.246591"
+  },
+  {
+    "endpoint": "/mail/drafts/test-draft-id",
+    "method": "PUT",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:07:58.300351"
+  },
+  {
+    "endpoint": "/mail/drafts/test-draft-id",
+    "method": "DELETE",
+    "status_code": 405,
+    "success": false,
+    "error_msg": "HTTP 405: {\"detail\":\"Method Not Allowed\"}",
+    "timestamp": "2025-09-18T00:08:00.360838"
+  },
+  {
+    "endpoint": "/mail/trash",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:02.411637"
+  },
+  {
+    "endpoint": "/mail/trash/test-mail-id",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:04.459313"
+  },
+  {
+    "endpoint": "/mail/test-mail-id/trash",
+    "method": "PUT",
+    "status_code": 404,
+    "success": false,
+    "error_msg": "HTTP 404: {\"detail\":\"Not Found\"}",
+    "timestamp": "2025-09-18T00:08:06.511180"
+  },
+  {
+    "endpoint": "/mail/test-mail-id/restore",
+    "method": "PUT",
+    "status_code": 404,
+    "success": false,
+    "error_msg": "HTTP 404: {\"detail\":\"Not Found\"}",
+    "timestamp": "2025-09-18T00:08:08.572846"
+  },
+  {
+    "endpoint": "/mail/test-mail-id/permanent",
+    "method": "DELETE",
+    "status_code": 404,
+    "success": false,
+    "error_msg": "HTTP 404: {\"detail\":\"Not Found\"}",
+    "timestamp": "2025-09-18T00:08:10.637940"
+  },
+  {
+    "endpoint": "/mail/folders",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:12.721337"
+  },
+  {
+    "endpoint": "/mail/folders",
+    "method": "POST",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:14.761730"
+  },
+  {
+    "endpoint": "/mail/folders/test-folder-id",
+    "method": "GET",
+    "status_code": 405,
+    "success": false,
+    "error_msg": "HTTP 405: {\"detail\":\"Method Not Allowed\"}",
+    "timestamp": "2025-09-18T00:08:16.813983"
+  },
+  {
+    "endpoint": "/mail/folders/test-folder-id",
+    "method": "PUT",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:18.876297"
+  },
+  {
+    "endpoint": "/mail/folders/test-folder-id",
+    "method": "DELETE",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:20.934390"
+  },
+  {
+    "endpoint": "/mail/test-mail-id/move",
+    "method": "PUT",
+    "status_code": 404,
+    "success": false,
+    "error_msg": "HTTP 404: {\"detail\":\"Not Found\"}",
+    "timestamp": "2025-09-18T00:08:22.996546"
+  },
+  {
+    "endpoint": "/mail/test-mail-id/attachments",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:25.028361"
+  },
+  {
+    "endpoint": "/mail/attachments/test-attachment-id/download",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:27.066972"
+  },
+  {
+    "endpoint": "/mail/search",
+    "method": "POST",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:29.127346"
+  },
+  {
+    "endpoint": "/mail/stats",
+    "method": "GET",
+    "status_code": 403,
+    "success": true,
+    "error_msg": "",
+    "timestamp": "2025-09-18T00:08:31.201189"
+  },
+  {
+    "endpoint": "/mail/bulk",
+    "method": "POST",
+    "status_code": 405,
+    "success": false,
+    "error_msg": "HTTP 405: {\"detail\":\"Method Not Allowed\"}",
+    "timestamp": "2025-09-18T00:08:33.260558"
+  }
+]

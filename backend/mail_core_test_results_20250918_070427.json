@@ -1,0 +1,65 @@
+[
+  {
+    "test_name": "인증 없는 접근 차단",
+    "success": false,
+    "details": "예상과 다른 응답: HTTP 403",
+    "timestamp": "2025-09-18T07:04:12.564770",
+    "response_data": "{\"detail\":\"Not authenticated\"}"
+  },
+  {
+    "test_name": "기본 메일 발송",
+    "success": false,
+    "details": "HTTP 422",
+    "timestamp": "2025-09-18T07:04:14.622030",
+    "response_data": "{\"detail\":[{\"type\":\"enum\",\"loc\":[\"body\",\"priority\"],\"msg\":\"Input should be 'high', 'normal' or 'low'\",\"input\":\"NORMAL\",\"ctx\":{\"expected\":\"'high', 'normal' or 'low'\"}}]}"
+  },
+  {
+    "test_name": "CC, BCC 포함 메일 발송",
+    "success": false,
+    "details": "HTTP 422",
+    "timestamp": "2025-09-18T07:04:16.663300",
+    "response_data": "{\"detail\":[{\"type\":\"enum\",\"loc\":[\"body\",\"priority\"],\"msg\":\"Input should be 'high', 'normal' or 'low'\",\"input\":\"HIGH\",\"ctx\":{\"expected\":\"'high', 'normal' or 'low'\"}}]}"
+  },
+  {
+    "test_name": "필수 필드 누락 (제목)",
+    "success": true,
+    "details": "예상된 422 Validation Error",
+    "timestamp": "2025-09-18T07:04:18.719036",
+    "response_data": 422
+  },
+  {
+    "test_name": "보낸 메일함 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:04:21.791434",
+    "response_data": "{\"detail\":\"보낸 메일함 조회 중 오류가 발생했습니다: 3 validation errors for PaginationResponse\\ntotal_pages\\n  Field required [type=missing, input_value={'page': 1, 'limit': 20, 'total': 0, 'pages': 0}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.5/v/missing\\nhas_next\\n  Field required [type=missing, input_value={'page': 1, 'limit': 20, 'total': 0, 'pages': 0}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.5/v/missing\\nhas_prev\\n  Field required [type=missing, input_value={'page': 1, 'limit': 20, 'total': 0, 'pages': 0}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.5/v/missing\"}"
+  },
+  {
+    "test_name": "보낸 메일 상세 조회",
+    "success": false,
+    "details": "테스트할 메일 ID가 없음",
+    "timestamp": "2025-09-18T07:04:21.793439",
+    "response_data": null
+  },
+  {
+    "test_name": "받은 메일함 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:04:23.867461",
+    "response_data": "{\"detail\":\"받은 메일함 조회 중 오류가 발생했습니다: type object 'MailFolder' has no attribute 'type'\"}"
+  },
+  {
+    "test_name": "임시보관함 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:04:25.908791",
+    "response_data": "{\"detail\":\"임시보관함 조회 중 오류가 발생했습니다: 3 validation errors for PaginationResponse\\ntotal_pages\\n  Field required [type=missing, input_value={'page': 1, 'limit': 20, 'total': 0, 'pages': 0}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.5/v/missing\\nhas_next\\n  Field required [type=missing, input_value={'page': 1, 'limit': 20, 'total': 0, 'pages': 0}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.5/v/missing\\nhas_prev\\n  Field required [type=missing, input_value={'page': 1, 'limit': 20, 'total': 0, 'pages': 0}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.5/v/missing\"}"
+  },
+  {
+    "test_name": "휴지통 조회",
+    "success": false,
+    "details": "HTTP 500",
+    "timestamp": "2025-09-18T07:04:27.964149",
+    "response_data": "{\"detail\":\"휴지통 조회 중 오류가 발생했습니다: type object 'MailFolder' has no attribute 'type'\"}"
+  }
+]
