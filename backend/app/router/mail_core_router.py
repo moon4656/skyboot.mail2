@@ -13,30 +13,33 @@ import logging
 import json
 
 from ..database.base import get_db
-from ..model.base_model import User
+from ..model.user_model import User
 from ..model.mail_model import Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog
 from ..schemas.mail_schema import (
-    MailCreate, MailResponse, MailListResponse, MailDetailResponse,
-    MailSendRequest, MailSendResponse, MailSearchRequest, MailSearchResponse,
-    MailListWithPaginationResponse, MailUserResponse,
-    PaginationResponse, MailStatsResponse, APIResponse,
-    RecipientType, MailStatus, MailPriority, FolderType
+    MailSendRequest,
+    MailResponse,
+    MailListResponse,
+    MailSendResponse,
+    MailDetailResponse,
+    MailListWithPaginationResponse,
+    PaginationResponse,
+    RecipientType,
+    MailStatus,
+    MailPriority,
 )
 from ..service.mail_service import MailService
 from ..service.auth_service import get_current_user
+from ..middleware.tenant import get_current_org_id, get_current_organization
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 라우터 초기화 - 필수 기능
-router = APIRouter(tags=["mail-core"])
+router = APIRouter(tags=["메일 핵심 기능"])
 
 # 보안 설정
 security = HTTPBearer()
-
-# 메일 서비스 초기화
-mail_service = MailService()
 
 # 첨부파일 저장 디렉토리
 ATTACHMENT_DIR = "attachments"
@@ -53,27 +56,36 @@ async def send_mail(
     priority: MailPriority = Form(MailPriority.NORMAL, description="메일 우선순위"),
     attachments: List[UploadFile] = File(None, description="첨부파일"),
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
-    """메일 발송 API"""
+) -> MailSendResponse:
+    """
+    메일 발송 API
+    조직 내에서 메일을 발송합니다.
+    """
     try:
-        logger.info(f"User {current_user.email} is sending mail to {to_emails}")
+        logger.info(f"📤 메일 발송 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 수신자: {to_emails}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 조직 내에서 메일 사용자 조회
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_id == current_user.user_id,
+            MailUser.org_id == current_org_id
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            raise HTTPException(status_code=404, detail="Mail user not found in this organization")
         
-        # 메일 생성
+        # 메일 생성 (조직 ID 포함)
         mail = Mail(
-            sender_id=mail_user.id,
+            sender_uuid=mail_user.id,
+            org_id=current_org_id,
             subject=subject,
             body_text=content,
             priority=priority,
             status=MailStatus.SENT,
             is_draft=False,
             created_at=datetime.utcnow(),
-            sent_at=datetime.utcnow()
+            sent_at=datetime.utcnow(),
+            message_id=str(uuid.uuid4())
         )
         
         db.add(mail)
@@ -82,19 +94,25 @@ async def send_mail(
         # 수신자 처리
         recipients = []
         
-        # TO 수신자
+        # TO 수신자 처리 (조직별 격리)
         if to_emails:
             for email in to_emails.split(','):
                 email = email.strip()
                 if email:
-                    # 수신자 사용자 찾기 또는 생성
-                    recipient_user = db.query(MailUser).filter(MailUser.email == email).first()
+                    # 같은 조직 내에서 수신자 사용자 찾기
+                    recipient_user = db.query(MailUser).filter(
+                        MailUser.email == email,
+                        MailUser.org_id == current_org_id
+                    ).first()
+                    
                     if not recipient_user:
-                        # 외부 사용자인 경우 임시 사용자 생성
+                        # 조직 내에 없는 경우 외부 사용자로 임시 생성
                         recipient_user = MailUser(
                             email=email,
                             password_hash="external_user",  # 외부 사용자 표시
-                            is_active=False
+                            is_active=False,
+                            org_id=current_org_id,  # 현재 조직에 속하도록 설정
+                            user_uuid=str(uuid.uuid4())
                         )
                         db.add(recipient_user)
                         db.flush()
@@ -107,19 +125,25 @@ async def send_mail(
                     recipients.append(recipient)
                     db.add(recipient)
         
-        # CC 수신자
+        # CC 수신자 처리 (조직별 격리)
         if cc_emails:
             for email in cc_emails.split(','):
                 email = email.strip()
                 if email:
-                    # 수신자 사용자 찾기 또는 생성
-                    recipient_user = db.query(MailUser).filter(MailUser.email == email).first()
+                    # 같은 조직 내에서 수신자 사용자 찾기
+                    recipient_user = db.query(MailUser).filter(
+                        MailUser.email == email,
+                        MailUser.org_id == current_org_id
+                    ).first()
+                    
                     if not recipient_user:
-                        # 외부 사용자인 경우 임시 사용자 생성
+                        # 조직 내에 없는 경우 외부 사용자로 임시 생성
                         recipient_user = MailUser(
                             email=email,
                             password_hash="external_user",  # 외부 사용자 표시
-                            is_active=False
+                            is_active=False,
+                            org_id=current_org_id,  # 현재 조직에 속하도록 설정
+                            user_uuid=str(uuid.uuid4())
                         )
                         db.add(recipient_user)
                         db.flush()
@@ -132,19 +156,25 @@ async def send_mail(
                     recipients.append(recipient)
                     db.add(recipient)
         
-        # BCC 수신자
+        # BCC 수신자 처리 (조직별 격리)
         if bcc_emails:
             for email in bcc_emails.split(','):
                 email = email.strip()
                 if email:
-                    # 수신자 사용자 찾기 또는 생성
-                    recipient_user = db.query(MailUser).filter(MailUser.email == email).first()
+                    # 같은 조직 내에서 수신자 사용자 찾기
+                    recipient_user = db.query(MailUser).filter(
+                        MailUser.email == email,
+                        MailUser.org_id == current_org_id
+                    ).first()
+                    
                     if not recipient_user:
-                        # 외부 사용자인 경우 임시 사용자 생성
+                        # 조직 내에 없는 경우 외부 사용자로 임시 생성
                         recipient_user = MailUser(
                             email=email,
                             password_hash="external_user",  # 외부 사용자 표시
-                            is_active=False
+                            is_active=False,
+                            org_id=current_org_id,  # 현재 조직에 속하도록 설정
+                            user_uuid=str(uuid.uuid4())
                         )
                         db.add(recipient_user)
                         db.flush()
@@ -185,16 +215,21 @@ async def send_mail(
         
         db.commit()
         
+        logger.info(f"✅ 메일 발송 완료 - 조직: {current_org_id}, 메일 ID: {mail.id}, 수신자 수: {len(recipients)}, 첨부파일 수: {len(attachment_list)}")
+        
         return MailSendResponse(
             success=True,
             message="메일이 성공적으로 발송되었습니다.",
-            mail_uuid=mail.mail_uuid,
+            mail_uuid=mail.message_id,
             sent_at=mail.sent_at
         )
         
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Error sending mail: {str(e)}")
+        logger.error(f"❌ 메일 발송 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 오류: {str(e)}")
         raise HTTPException(status_code=500, detail=f"메일 발송 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -205,16 +240,23 @@ async def get_inbox_mails(
     search: Optional[str] = Query(None, description="검색어 (제목, 발신자)"),
     status: Optional[MailStatus] = Query(None, description="메일 상태 필터"),
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> MailListWithPaginationResponse:
     """받은 메일함 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching inbox mails")
+        logger.info(f"📥 받은 메일함 조회 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링)
+        mail_user = db.query(MailUser).filter(
+            and_(
+                MailUser.user_id == current_user.id,
+                MailUser.org_id == current_org_id
+            )
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="해당 조직에서 메일 사용자를 찾을 수 없습니다")
         
         # 받은 메일함 폴더 조회
         inbox_folder = db.query(MailFolder).filter(
@@ -227,11 +269,14 @@ async def get_inbox_mails(
         if not inbox_folder:
             raise HTTPException(status_code=404, detail="Inbox folder not found")
         
-        # 기본 쿼리
+        # 기본 쿼리 (조직별 필터링 포함)
         query = db.query(Mail).join(
             MailInFolder, Mail.id == MailInFolder.mail_id
         ).filter(
-            MailInFolder.folder_id == inbox_folder.id
+            and_(
+                MailInFolder.folder_id == inbox_folder.id,
+                Mail.org_id == current_org_id
+            )
         )
         
         # 검색 조건 추가
@@ -257,8 +302,13 @@ async def get_inbox_mails(
         # 응답 데이터 구성
         mail_list = []
         for mail in mails:
-            # 발신자 정보
-            sender = db.query(MailUser).filter(MailUser.id == mail.sender_id).first()
+            # 발신자 정보 (조직별 필터링)
+            sender = db.query(MailUser).filter(
+                and_(
+                    MailUser.user_uuid == mail.sender_uuid,
+                    MailUser.org_id == current_org_id
+                )
+            ).first()
             sender_email = sender.email if sender else "Unknown"
             
             # 수신자 정보
@@ -314,33 +364,44 @@ async def get_inbox_mails(
             has_prev=page > 1
         )
         
+        logger.info(f"✅ 받은 메일함 조회 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일 수: {len(mail_list)}")
+        
         return MailListWithPaginationResponse(
             mails=mail_list,
             pagination=pagination
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching inbox mails: {str(e)}")
+        logger.error(f"❌ 받은 메일함 조회 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 오류: {str(e)}")
         raise HTTPException(status_code=500, detail=f"받은 메일함 조회 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.get("/inbox/{mail_id}", response_model=MailDetailResponse, summary="받은 메일 상세")
+@router.get("/inbox/{mail_id}", response_model=MailDetailResponse, summary="받은 메일 상세 조회")
 async def get_inbox_mail_detail(
     mail_id: str,
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> MailDetailResponse:
     """받은 메일 상세 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching mail detail: {mail_id}")
+        logger.info(f"📧 get_inbox_mail_detail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
         
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.id == mail_id).first()
+        # 메일 조회 (조직별 격리)
+        mail = db.query(Mail).filter(
+            Mail.id == mail_id,
+            Mail.org_id == current_org_id
+        ).first()
         if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
+            raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
         
-        # 발신자 정보
-        sender = db.query(MailUser).filter(MailUser.id == mail.sender_id).first()
+        # 발신자 정보 (조직별 격리)
+        sender = db.query(MailUser).filter(
+            MailUser.user_uuid == mail.sender_uuid,
+            MailUser.org_id == current_org_id
+        ).first()
         sender_email = sender.email if sender else "Unknown"
         
         # 수신자 정보
@@ -360,10 +421,13 @@ async def get_inbox_mail_detail(
                 "content_type": attachment.content_type
             })
         
-        # 현재 사용자의 수신자 레코드 찾기
-        mail_user = db.query(MailUser).filter(MailUser.email == current_user.email).first()
+        # 현재 사용자의 수신자 레코드 찾기 (조직별 격리)
+        mail_user = db.query(MailUser).filter(
+            MailUser.email == current_user.email,
+            MailUser.org_id == current_org_id
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
         current_recipient = db.query(MailRecipient).filter(
             MailRecipient.mail_id == mail.id,
@@ -377,6 +441,8 @@ async def get_inbox_mail_detail(
                 current_recipient.read_at = datetime.utcnow()
                 db.commit()
             read_at = current_recipient.read_at
+        
+        logger.info(f"✅ get_inbox_mail_detail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
         
         return MailDetailResponse(
             success=True,
@@ -398,7 +464,7 @@ async def get_inbox_mail_detail(
         )
         
     except Exception as e:
-        logger.error(f"Error fetching mail detail: {str(e)}")
+        logger.error(f"❌ get_inbox_mail_detail 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"메일 상세 조회 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -408,22 +474,30 @@ async def get_sent_mails(
     limit: int = Query(20, ge=1, le=100, description="페이지당 항목 수"),
     search: Optional[str] = Query(None, description="검색어 (제목, 수신자)"),
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> MailListWithPaginationResponse:
     """보낸 메일함 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching sent mails")
+        logger.info(f"📤 보낸 메일함 조회 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링)
+        mail_user = db.query(MailUser).filter(
+            and_(
+                MailUser.user_id == current_user.id,
+                MailUser.org_id == current_org_id
+            )
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="해당 조직에서 메일 사용자를 찾을 수 없습니다")
         
-        # 기본 쿼리 - 발신자가 현재 사용자인 메일
+        # 기본 쿼리 - 발신자가 현재 사용자인 메일 (조직별 필터링 포함)
         query = db.query(Mail).filter(
             and_(
-                Mail.sender_id == mail_user.id,
-                Mail.status == MailStatus.SENT
+                Mail.sender_uuid == mail_user.user_uuid,
+                Mail.status == MailStatus.SENT,
+                Mail.org_id == current_org_id
             )
         )
         
@@ -491,13 +565,17 @@ async def get_sent_mails(
             has_prev=page > 1
         )
         
+        logger.info(f"✅ 보낸 메일함 조회 완료 - org_id: {current_org_id}, user: {current_user.email}, 메일 수: {len(mail_list)}")
+        
         return MailListWithPaginationResponse(
             mails=mail_list,
             pagination=pagination
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching sent mails: {str(e)}")
+        logger.error(f"❌ 보낸 메일함 조회 중 오류 발생 - org_id: {current_org_id}, user: {current_user.email}, error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"보낸 메일함 조회 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -505,21 +583,33 @@ async def get_sent_mails(
 async def get_sent_mail_detail(
     mail_id: str,
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> MailDetailResponse:
     """보낸 메일 상세 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching sent mail detail: {mail_id}")
+        logger.info(f"📧 보낸 메일 상세 조회 시작 - org_id: {current_org_id}, user: {current_user.email}, mail_id: {mail_id}")
         
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.id == mail_id).first()
+        # 메일 사용자 조회 (조직별 필터링)
+        mail_user = db.query(MailUser).filter(
+            and_(
+                MailUser.user_id == current_user.id,
+                MailUser.org_id == current_org_id
+            )
+        ).first()
+        if not mail_user:
+            raise HTTPException(status_code=404, detail="해당 조직에서 메일 사용자를 찾을 수 없습니다")
+        
+        # 메일 조회 (조직별 필터링)
+        mail = db.query(Mail).filter(
+            and_(
+                Mail.id == mail_id,
+                Mail.org_id == current_org_id,
+                Mail.sender_uuid == mail_user.id
+            )
+        ).first()
         if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
-        
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
-        if not mail_user or mail.sender_id != mail_user.id:
-            raise HTTPException(status_code=403, detail="Access denied")
+            raise HTTPException(status_code=404, detail="메일을 찾을 수 없거나 접근 권한이 없습니다")
         
         # 수신자 정보
         recipients = db.query(MailRecipient).filter(MailRecipient.mail_id == mail.id).all()
@@ -537,6 +627,8 @@ async def get_sent_mail_detail(
                 "file_size": attachment.file_size,
                 "content_type": attachment.content_type
             })
+        
+        logger.info(f"✅ 보낸 메일 상세 조회 완료 - org_id: {current_org_id}, user: {current_user.email}, mail_id: {mail_id}")
         
         return MailDetailResponse(
             success=True,
@@ -557,8 +649,10 @@ async def get_sent_mail_detail(
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching sent mail detail: {str(e)}")
+        logger.error(f"❌ 보낸 메일 상세 조회 중 오류 발생 - org_id: {current_org_id}, user: {current_user.email}, mail_id: {mail_id}, error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"보낸 메일 상세 조회 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -568,22 +662,29 @@ async def get_draft_mails(
     limit: int = Query(20, ge=1, le=100, description="페이지당 항목 수"),
     search: Optional[str] = Query(None, description="검색어 (제목, 수신자)"),
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> MailListWithPaginationResponse:
     """임시보관함 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching draft mails")
+        logger.info(f"📧 임시보관함 조회 시작 - org_id: {current_org_id}, user: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링)
+        mail_user = db.query(MailUser).filter(
+            and_(
+                MailUser.user_id == current_user.id,
+                MailUser.org_id == current_org_id
+            )
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            raise HTTPException(status_code=404, detail="해당 조직에서 메일 사용자를 찾을 수 없습니다")
         
-        # 기본 쿼리 - 임시보관 상태인 메일
+        # 기본 쿼리 - 임시보관 상태인 메일 (조직별 필터링)
         query = db.query(Mail).filter(
             and_(
-                Mail.sender_id == mail_user.id,
-                Mail.status == MailStatus.DRAFT
+                Mail.sender_uuid == mail_user.id,
+                Mail.status == MailStatus.DRAFT,
+                Mail.org_id == current_org_id
             )
         )
         
@@ -638,13 +739,17 @@ async def get_draft_mails(
             has_prev=page > 1
         )
         
+        logger.info(f"✅ 임시보관함 조회 완료 - org_id: {current_org_id}, user: {current_user.email}, 메일 수: {len(mail_list)}")
+        
         return MailListWithPaginationResponse(
             mails=mail_list,
             pagination=pagination
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching draft mails: {str(e)}")
+        logger.error(f"❌ 임시보관함 조회 중 오류 발생 - org_id: {current_org_id}, user: {current_user.email}, error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"임시보관함 조회 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -653,7 +758,7 @@ async def get_draft_mail_detail(
     mail_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
-):
+) -> MailDetailResponse:
     """임시보관함 메일 상세 조회"""
     try:
         # 메일 조회
@@ -663,7 +768,7 @@ async def get_draft_mail_detail(
         
         # 메일 사용자 조회
         mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
-        if not mail_user or mail.sender_id != mail_user.id:
+        if not mail_user or mail.sender_uuid != mail_user.id:
             raise HTTPException(status_code=403, detail="Access denied")
         
         # 수신자 정보
@@ -711,35 +816,43 @@ async def get_draft_mail_detail(
 async def get_deleted_mails(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"), 
     search: Optional[str] = Query(None, description="Search keyword"),
     status: Optional[MailStatus] = Query(None, description="Mail status filter")
-):
+) -> MailListWithPaginationResponse:
     """휴지통 메일 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching deleted mails")
+        logger.info(f"📧 get_deleted_mails 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 페이지: {page}, 제한: {limit}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
         # 휴지통 폴더 조회
         trash_folder = db.query(MailFolder).filter(
             and_(
-                MailFolder.user_id == mail_user.id,
+                MailFolder.user_uuid == mail_user.id,
                 MailFolder.folder_type == FolderType.TRASH
             )
         ).first()
         
         if not trash_folder:
-            raise HTTPException(status_code=404, detail="Trash folder not found")
+            logger.warning(f"⚠️ 휴지통 폴더를 찾을 수 없음 - 사용자: {mail_user.id}")
+            raise HTTPException(status_code=404, detail="휴지통 폴더를 찾을 수 없습니다")
         
-        # 기본 쿼리
+        # 기본 쿼리 (조직별 필터링 추가)
         query = db.query(Mail).join(
             MailInFolder, Mail.id == MailInFolder.mail_id
         ).filter(
+            Mail.org_id == current_org_id,
             MailInFolder.folder_id == trash_folder.id
         )
         
@@ -767,7 +880,7 @@ async def get_deleted_mails(
         mail_list = []
         for mail in mails:
             # 발신자 정보
-            sender = db.query(MailUser).filter(MailUser.id == mail.sender_id).first()
+            sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
             sender_email = sender.email if sender else "Unknown"
             
             # 수신자 정보
@@ -802,13 +915,17 @@ async def get_deleted_mails(
             has_prev=page > 1
         )
         
+        logger.info(f"✅ get_deleted_mails 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일 수: {len(mail_list)}")
+        
         return MailListWithPaginationResponse(
             mails=mail_list,
             pagination=pagination
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching deleted mails: {str(e)}")
+        logger.error(f"❌ get_deleted_mails 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"휴지통 조회 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -816,17 +933,35 @@ async def get_deleted_mails(
 async def get_trash_mail_detail(
     mail_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id)
+) -> MailDetailResponse:
     """휴지통 메일 상세 조회"""
     try:
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.id == mail_id).first()
+        logger.info(f"📧 get_trash_mail_detail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
+        if not mail_user:
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
+        
+        # 메일 조회 (조직별 필터링 추가)
+        mail = db.query(Mail).filter(
+            Mail.id == mail_id,
+            Mail.org_id == current_org_id
+        ).first()
+        
         if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
+            logger.warning(f"⚠️ 메일을 찾을 수 없음 - 조직: {current_org_id}, 메일ID: {mail_id}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일을 찾을 수 없습니다")
         
         # 발신자 정보
-        sender = db.query(MailUser).filter(MailUser.id == mail.sender_id).first()
+        sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
         sender_email = sender.email if sender else "Unknown"
         
         # 수신자 정보
@@ -845,6 +980,8 @@ async def get_trash_mail_detail(
                 "file_size": attachment.file_size,
                 "content_type": attachment.content_type
             })
+        
+        logger.info(f"✅ get_trash_mail_detail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
         
         return MailDetailResponse(
             success=True,
@@ -865,36 +1002,52 @@ async def get_trash_mail_detail(
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching trash mail detail: {str(e)}")
+        logger.error(f"❌ get_trash_mail_detail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"휴지통 메일 상세 조회 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.get("/attachments/{attachment_id}", summary="첨부파일 다운로드")
+@router.get("/attachments/{attachment_id}", response_model=None, summary="첨부파일 다운로드")
 async def download_attachment(
     attachment_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> FileResponse:
     """첨부파일 다운로드"""
     try:
+        logger.info(f"📧 download_attachment 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 첨부파일ID: {attachment_id}")
+        
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
+        if not mail_user:
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
+        
         # 첨부파일 조회
         attachment = db.query(MailAttachment).filter(MailAttachment.id == attachment_id).first()
         if not attachment:
-            raise HTTPException(status_code=404, detail="Attachment not found")
+            logger.warning(f"⚠️ 첨부파일을 찾을 수 없음 - 첨부파일ID: {attachment_id}")
+            raise HTTPException(status_code=404, detail="첨부파일을 찾을 수 없습니다")
         
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.id == attachment.mail_id).first()
+        # 메일 조회 (조직별 필터링 추가)
+        mail = db.query(Mail).filter(
+            Mail.id == attachment.mail_id,
+            Mail.org_id == current_org_id
+        ).first()
+        
         if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
-        
-        # 권한 확인 (발신자이거나 수신자인지 확인)
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
-        if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일을 찾을 수 없음 - 조직: {current_org_id}, 메일ID: {attachment.mail_id}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일을 찾을 수 없습니다")
         
         # 발신자 확인
-        is_sender = mail.sender_id == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.id
         
         # 수신자 확인
         is_recipient = db.query(MailRecipient).filter(
@@ -905,11 +1058,15 @@ async def download_attachment(
         ).first() is not None
         
         if not (is_sender or is_recipient):
-            raise HTTPException(status_code=403, detail="Access denied")
+            logger.warning(f"⚠️ 첨부파일 접근 권한 없음 - 조직: {current_org_id}, 사용자: {current_user.email}, 첨부파일ID: {attachment_id}")
+            raise HTTPException(status_code=403, detail="첨부파일에 대한 접근 권한이 없습니다")
         
         # 파일 존재 확인
         if not os.path.exists(attachment.file_path):
-            raise HTTPException(status_code=404, detail="File not found")
+            logger.warning(f"⚠️ 첨부파일이 존재하지 않음 - 경로: {attachment.file_path}")
+            raise HTTPException(status_code=404, detail="첨부파일이 존재하지 않습니다")
+        
+        logger.info(f"✅ download_attachment 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 첨부파일: {attachment.filename}")
         
         return FileResponse(
             path=attachment.file_path,
@@ -917,6 +1074,8 @@ async def download_attachment(
             media_type=attachment.content_type
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error downloading attachment: {str(e)}")
+        logger.error(f"❌ download_attachment 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 첨부파일ID: {attachment_id}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"첨부파일 다운로드 중 오류가 발생했습니다: {str(e)}")

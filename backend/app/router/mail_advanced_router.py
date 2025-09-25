@@ -12,13 +12,14 @@ import tempfile
 from pathlib import Path
 
 from ..database.base import get_db
-from ..model.base_model import User
+from ..model.user_model import User
 from ..model.mail_model import (
     Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, 
     MailLog
 )
 # 스키마 import 제거 - 기본 타입 사용
 from ..service.auth_service import get_current_user
+from ..middleware.tenant import get_current_org_id
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -34,22 +35,31 @@ os.makedirs(BACKUP_DIR, exist_ok=True)
 
 # ===== 폴더 관리 =====
 
-@router.get("/folders", summary="폴더 목록 조회")
+@router.get("/folders", response_model=None, summary="폴더 목록 조회")
 async def get_folders(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> dict:
     """사용자의 모든 폴더 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching folders")
+        logger.info(f"📁 get_folders 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 폴더 조회
-        folders = db.query(MailFolder).filter(MailFolder.user_id == mail_user.id).all()
+        # 폴더 조회 (조직별 필터링 추가)
+        folders = db.query(MailFolder).filter(
+            MailFolder.user_id == mail_user.id,
+            MailFolder.org_id == current_org_id
+        ).all()
         
         # 각 폴더의 메일 개수 계산
         folder_list = []
@@ -64,40 +74,52 @@ async def get_folders(
                 "created_at": folder.created_at
             })
         
+        logger.info(f"✅ get_folders 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더 수: {len(folder_list)}")
+        
         return {"folders": folder_list}
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching folders: {str(e)}")
+        logger.error(f"❌ get_folders 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"폴더 조회 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.post("/folders", summary="폴더 생성")
+@router.post("/folders", response_model=None, summary="폴더 생성")
 async def create_folder(
     folder_data: dict,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> dict:
     """새 폴더 생성"""
     try:
-        logger.info(f"User {current_user.email} is creating folder: {folder_data.get('name')}")
+        logger.info(f"📁 create_folder 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {folder_data.get('name')}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 폴더명 중복 확인
+        # 폴더명 중복 확인 (조직별 필터링 추가)
         existing_folder = db.query(MailFolder).filter(
             MailFolder.user_id == mail_user.id,
+            MailFolder.org_id == current_org_id,
             MailFolder.name == folder_data.get('name')
         ).first()
         
         if existing_folder:
             raise HTTPException(status_code=400, detail="폴더명이 이미 존재합니다")
         
-        # 새 폴더 생성
+        # 새 폴더 생성 (조직 ID 추가)
         new_folder = MailFolder(
             user_id=mail_user.id,
+            org_id=current_org_id,
             name=folder_data.get('name'),
             folder_type=folder_data.get('folder_type', 'custom')
         )
@@ -105,6 +127,8 @@ async def create_folder(
         db.add(new_folder)
         db.commit()
         db.refresh(new_folder)
+        
+        logger.info(f"✅ create_folder 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {new_folder.name}, 폴더 ID: {new_folder.id}")
         
         return {
             "id": new_folder.id,
@@ -118,46 +142,54 @@ async def create_folder(
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Error creating folder: {str(e)}")
+        logger.error(f"❌ create_folder 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {folder_data.get('name')}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"폴더 생성 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.put("/folders/{folder_id}", summary="폴더 수정")
+@router.put("/folders/{folder_id}", response_model=None, summary="폴더 수정")
 async def update_folder(
     folder_id: str,
     folder_data: dict,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> dict:
     """폴더 정보 수정"""
     try:
-        logger.info(f"User {current_user.email} is updating folder {folder_id}")
+        logger.info(f"📁 update_folder 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더 ID: {folder_id}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 폴더 조회
+        # 폴더 조회 (조직별 필터링 추가)
         folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.id == folder_id,
-                MailFolder.user_id == mail_user.id
+                MailFolder.user_id == mail_user.id,
+                MailFolder.org_id == current_org_id
             )
         ).first()
         
         if not folder:
-            raise HTTPException(status_code=404, detail="Folder not found")
+            raise HTTPException(status_code=404, detail="폴더를 찾을 수 없습니다")
         
         # 시스템 폴더는 수정 불가
         if folder.folder_type in ['inbox', 'sent', 'drafts', 'trash']:
             raise HTTPException(status_code=400, detail="시스템 폴더는 수정할 수 없습니다")
         
-        # 폴더명 중복 확인 (자신 제외)
+        # 폴더명 중복 확인 (자신 제외, 조직별 필터링 추가)
         if folder_data.get('name') and folder_data.get('name') != folder.name:
             existing_folder = db.query(MailFolder).filter(
                 and_(
                     MailFolder.user_id == mail_user.id,
+                    MailFolder.org_id == current_org_id,
                     MailFolder.name == folder_data.get('name'),
                     MailFolder.id != folder_id
                 )
@@ -176,6 +208,8 @@ async def update_folder(
         # 메일 개수 계산
         mail_count = db.query(MailInFolder).filter(MailInFolder.folder_id == folder.id).count()
         
+        logger.info(f"✅ update_folder 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더 ID: {folder.id}, 폴더명: {folder.name}")
+        
         return {
             "id": folder.id,
             "name": folder.name,
@@ -189,44 +223,52 @@ async def update_folder(
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Error updating folder: {str(e)}")
+        logger.error(f"❌ update_folder 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더 ID: {folder_id}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"폴더 수정 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.delete("/folders/{folder_id}", summary="폴더 삭제")
+@router.delete("/folders/{folder_id}", response_model=None, summary="폴더 삭제")
 async def delete_folder(
     folder_id: str,
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> dict:
     """폴더 삭제"""
     try:
-        logger.info(f"User {current_user.email} is deleting folder {folder_id}")
+        logger.info(f"🗑️ delete_folder 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더 ID: {folder_id}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 폴더 조회
+        # 폴더 조회 (조직별 필터링 추가)
         folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.id == folder_id,
-                MailFolder.user_id == mail_user.id
+                MailFolder.user_id == mail_user.id,
+                MailFolder.org_id == current_org_id
             )
         ).first()
         
         if not folder:
-            raise HTTPException(status_code=404, detail="Folder not found")
+            raise HTTPException(status_code=404, detail="폴더를 찾을 수 없습니다")
         
         # 시스템 폴더는 삭제 불가
         if folder.folder_type in ['inbox', 'sent', 'drafts', 'trash']:
             raise HTTPException(status_code=400, detail="시스템 폴더는 삭제할 수 없습니다")
         
-        # 폴더 내 메일들을 받은편지함으로 이동
+        # 폴더 내 메일들을 받은편지함으로 이동 (조직별 필터링 추가)
         inbox_folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.user_id == mail_user.id,
+                MailFolder.org_id == current_org_id,
                 MailFolder.folder_type == 'inbox'
             )
         ).first()
@@ -243,6 +285,8 @@ async def delete_folder(
         db.delete(folder)
         db.commit()
         
+        logger.info(f"✅ delete_folder 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더 ID: {folder_id}, 폴더명: {folder.name}")
+        
         return {
             "success": True,
             "message": "폴더가 삭제되었습니다.",
@@ -253,7 +297,7 @@ async def delete_folder(
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Error deleting folder: {str(e)}")
+        logger.error(f"❌ delete_folder 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더 ID: {folder_id}, 에러: {str(e)}")
         return {
             "success": False,
             "message": f"폴더 삭제 중 오류가 발생했습니다: {str(e)}",
@@ -261,40 +305,51 @@ async def delete_folder(
         }
 
 
-@router.post("/folders/{folder_id}/mails/{mail_id}", summary="메일을 폴더로 이동")
+@router.post("/folders/{folder_id}/mails/{mail_id}", response_model=None, summary="메일을 폴더로 이동")
 async def move_mail_to_folder(
     folder_id: str,
     mail_id: str,
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> dict:
     """메일을 특정 폴더로 이동"""
     try:
-        logger.info(f"User {current_user.email} is moving mail {mail_id} to folder {folder_id}")
+        logger.info(f"📁 move_mail_to_folder 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일 ID: {mail_id}, 폴더 ID: {folder_id}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 폴더 조회
+        # 폴더 조회 (조직별 필터링 추가)
         folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.id == folder_id,
-                MailFolder.user_id == mail_user.id
+                MailFolder.user_id == mail_user.id,
+                MailFolder.org_id == current_org_id
             )
         ).first()
         
         if not folder:
-            raise HTTPException(status_code=404, detail="Folder not found")
+            raise HTTPException(status_code=404, detail="폴더를 찾을 수 없습니다")
         
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.id == mail_id).first()
+        # 메일 조회 (조직별 필터링 추가)
+        mail = db.query(Mail).filter(
+            Mail.id == mail_id,
+            Mail.org_id == current_org_id
+        ).first()
+        
         if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
+            raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
         
         # 권한 확인
-        is_sender = mail.sender_id == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.id
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_id == mail.id,
@@ -335,6 +390,8 @@ async def move_mail_to_folder(
         db.add(log_entry)
         db.commit()
         
+        logger.info(f"✅ move_mail_to_folder 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일 ID: {mail_id}, 폴더: {folder.name}")
+        
         return {
             "success": True,
             "message": f"메일이 '{folder.name}' 폴더로 이동되었습니다.",
@@ -349,7 +406,7 @@ async def move_mail_to_folder(
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Error moving mail to folder: {str(e)}")
+        logger.error(f"❌ move_mail_to_folder 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일 ID: {mail_id}, 폴더 ID: {folder_id}, 에러: {str(e)}")
         return {
             "success": False,
             "message": f"메일 이동 중 오류가 발생했습니다: {str(e)}",
@@ -362,30 +419,39 @@ async def move_mail_to_folder(
 
 # ===== 백업 및 복원 =====
 
-@router.post("/backup", summary="메일 백업")
+@router.post("/backup", response_model=None, summary="메일 백업")
 async def backup_mails(
     include_attachments: bool = Query(False, description="첨부파일 포함 여부"),
     date_from: Optional[datetime] = Query(None, description="백업 시작 날짜"),
     date_to: Optional[datetime] = Query(None, description="백업 종료 날짜"),
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> dict:
     """사용자 메일 백업"""
     try:
-        logger.info(f"User {current_user.email} is creating mail backup")
+        logger.info(f"💾 backup_mails 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 백업할 메일 조회
+        # 백업할 메일 조회 (조직별 필터링 추가)
         query = db.query(Mail).filter(
-            or_(
-                Mail.sender_id == mail_user.id,
-                Mail.id.in_(
-                    db.query(MailRecipient.mail_id).filter(
-                        MailRecipient.recipient_id == mail_user.id
+            and_(
+                Mail.org_id == current_org_id,
+                or_(
+                    Mail.sender_uuid == mail_user.id,
+                    Mail.id.in_(
+                        db.query(MailRecipient.mail_id).filter(
+                            MailRecipient.recipient_id == mail_user.id
+                        )
                     )
                 )
             )
@@ -410,7 +476,7 @@ async def backup_mails(
             
             for mail in mails:
                 # 발신자 정보
-                sender = db.query(MailUser).filter(MailUser.id == mail.sender_id).first()
+                sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
                 
                 # 수신자 정보
                 recipients = db.query(MailRecipient).filter(MailRecipient.mail_id == mail.id).all()
@@ -469,6 +535,8 @@ async def backup_mails(
         # 백업 파일 크기 계산
         backup_size = os.path.getsize(backup_path)
         
+        logger.info(f"✅ backup_mails 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일 수: {len(mails)}, 파일 크기: {backup_size}")
+        
         return {
             "success": True,
             "message": "메일 백업이 완료되었습니다.",
@@ -483,27 +551,31 @@ async def backup_mails(
         }
         
     except Exception as e:
-        logger.error(f"Error creating mail backup: {str(e)}")
+        logger.error(f"❌ backup_mails 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"메일 백업 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.get("/backup/{backup_filename}", summary="백업 파일 다운로드")
+@router.get("/backup/{backup_filename}", response_model=None, summary="백업 파일 다운로드")
 async def download_backup(
     backup_filename: str,
-    current_user: User = Depends(get_current_user)
-):
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id)
+) -> FileResponse:
     """백업 파일 다운로드"""
     try:
-        logger.info(f"User {current_user.email} is downloading backup: {backup_filename}")
+        logger.info(f"📥 download_backup 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {backup_filename}")
         
         # 파일명 검증 (보안)
         if not backup_filename.startswith(f"mail_backup_{current_user.email}_"):
-            raise HTTPException(status_code=403, detail="Access denied")
+            logger.warning(f"⚠️ 백업 파일 접근 거부 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {backup_filename}")
+            raise HTTPException(status_code=403, detail="접근이 거부되었습니다")
         
         backup_path = os.path.join(BACKUP_DIR, backup_filename)
         
         if not os.path.exists(backup_path):
-            raise HTTPException(status_code=404, detail="Backup file not found")
+            raise HTTPException(status_code=404, detail="백업 파일을 찾을 수 없습니다")
+        
+        logger.info(f"✅ download_backup 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {backup_filename}")
         
         return FileResponse(
             path=backup_path,
@@ -512,25 +584,29 @@ async def download_backup(
         )
         
     except Exception as e:
-        logger.error(f"Error downloading backup: {str(e)}")
+        logger.error(f"❌ download_backup 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {backup_filename}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"백업 파일 다운로드 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.post("/restore", summary="메일 복원")
+@router.post("/restore", response_model=None, summary="메일 복원")
 async def restore_mails(
     backup_file: UploadFile = File(..., description="백업 파일"),
     overwrite_existing: bool = Form(False, description="기존 메일 덮어쓰기 여부"),
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> dict:
     """백업 파일로부터 메일 복원"""
     try:
-        logger.info(f"User {current_user.email} is restoring mails from backup")
+        logger.info(f"📦 restore_mails 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 격리)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_id == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
         # 임시 파일로 저장
         with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
@@ -552,8 +628,11 @@ async def restore_mails(
                 
                 for mail_info in mail_data:
                     try:
-                        # 기존 메일 확인
-                        existing_mail = db.query(Mail).filter(Mail.id == mail_info['id']).first()
+                        # 기존 메일 확인 (조직별 격리)
+                        existing_mail = db.query(Mail).filter(
+                            Mail.id == mail_info['id'],
+                            Mail.org_id == current_org_id
+                        ).first()
                         
                         if existing_mail and not overwrite_existing:
                             skipped_count += 1
@@ -571,12 +650,13 @@ async def restore_mails(
                             if mail_info['read_at']:
                                 existing_mail.read_at = datetime.fromisoformat(mail_info['read_at'])
                         else:
-                            # 새 메일 생성
+                            # 새 메일 생성 (조직 ID 포함)
                             new_mail = Mail(
                                 id=mail_info['id'],
                                 subject=mail_info['subject'],
                                 content=mail_info['content'],
-                                sender_id=mail_user.id,  # 현재 사용자로 설정
+                                sender_uuid=mail_user.id,  # 현재 사용자로 설정
+                                org_id=current_org_id,  # 조직 ID 설정
                                 status=mail_info['status'],
                                 priority=mail_info['priority'],
                                 created_at=datetime.fromisoformat(mail_info['created_at']) if mail_info['created_at'] else datetime.utcnow(),
@@ -607,6 +687,8 @@ async def restore_mails(
             # 임시 파일 삭제
             os.unlink(temp_file.name)
         
+        logger.info(f"✅ restore_mails 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 복원: {restored_count}개, 건너뜀: {skipped_count}개")
+        
         return {
             "success": True,
             "message": f"메일 복원이 완료되었습니다. (복원: {restored_count}개, 건너뜀: {skipped_count}개)",
@@ -619,7 +701,7 @@ async def restore_mails(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Error restoring mails: {str(e)}")
+        logger.error(f"❌ restore_mails 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         return {
             "success": False,
             "message": f"메일 복원 중 오류가 발생했습니다: {str(e)}",
@@ -627,20 +709,24 @@ async def restore_mails(
         }
 
 
-@router.get("/analytics", summary="메일 분석")
+@router.get("/analytics", response_model=None, summary="메일 분석")
 async def get_mail_analytics(
     period: str = Query("month", description="분석 기간 (week, month, year)"),
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> dict:
     """메일 사용 분석"""
     try:
-        logger.info(f"User {current_user.email} is fetching mail analytics for period: {period}")
+        logger.info(f"📊 get_mail_analytics 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 기간: {period}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 격리)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_id == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
         # 기간 설정
         now = datetime.utcnow()
@@ -653,21 +739,23 @@ async def get_mail_analytics(
         else:
             start_date = now - timedelta(days=30)  # 기본값
         
-        # 보낸 메일 통계
+        # 보낸 메일 통계 (조직별 격리)
         sent_mails = db.query(Mail).filter(
             and_(
-                Mail.sender_id == mail_user.id,
+                Mail.sender_uuid == mail_user.id,
+                Mail.org_id == current_org_id,
                 Mail.created_at >= start_date,
                 Mail.status == 'sent'
             )
         ).all()
         
-        # 받은 메일 통계
+        # 받은 메일 통계 (조직별 격리)
         received_mails = db.query(Mail).join(
             MailRecipient, Mail.id == MailRecipient.mail_id
         ).filter(
             and_(
                 MailRecipient.recipient_id == mail_user.id,
+                Mail.org_id == current_org_id,
                 Mail.created_at >= start_date
             )
         ).all()
@@ -713,7 +801,7 @@ async def get_mail_analytics(
         recipient_stats = {}
         
         for mail in received_mails:
-            sender = db.query(MailUser).filter(MailUser.id == mail.sender_id).first()
+            sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
             if sender:
                 sender_email = sender.email
                 sender_stats[sender_email] = sender_stats.get(sender_email, 0) + 1
@@ -727,6 +815,8 @@ async def get_mail_analytics(
         # 상위 5개만 선택
         top_senders = sorted(sender_stats.items(), key=lambda x: x[1], reverse=True)[:5]
         top_recipients = sorted(recipient_stats.items(), key=lambda x: x[1], reverse=True)[:5]
+        
+        logger.info(f"✅ get_mail_analytics 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 보낸메일: {len(sent_mails)}개, 받은메일: {len(received_mails)}개")
         
         return {
             "success": True,
@@ -754,7 +844,7 @@ async def get_mail_analytics(
         }
         
     except Exception as e:
-        logger.error(f"Error fetching mail analytics: {str(e)}")
+        logger.error(f"❌ get_mail_analytics 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         return {
             "success": False,
             "message": f"메일 분석 조회 중 오류가 발생했습니다: {str(e)}",

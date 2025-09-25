@@ -19,7 +19,11 @@
 
 ### 1.1 프로젝트 구조
 - **백엔드**: `backend/` 디렉토리에 FastAPI 기반 메일 서버 API
+  - `backend/test/` - 모든 백엔드 테스트 코드 (pytest 기반)
+  - `backend/app/` - 메인 애플리케이션 코드
+  - `backend/migration/` - 데이터베이스 마이그레이션 스크립트
 - **프론트엔드**: `frontend/` 디렉토리에 Vue.js 3 기반 웹 메일 클라이언트
+  - `frontend/tests/` - 프론트엔드 테스트 코드
 - **메일 서버**: Postfix (SMTP), Dovecot (IMAP/POP3) 설정 파일
 - **환경 설정**: `.env` 파일을 사용하여 환경별 설정 관리
 - **의존성 관리**: `requirements.txt` (Python), `package.json` (Node.js)
@@ -241,10 +245,13 @@
 ## 🧪 테스트 규칙
 
 ### 8.1 테스트 구조
-- `test/` 디렉토리에 테스트 코드 구성
-- pytest 프레임워크 사용
+- **백엔드 테스트**: `/backend/test/` 디렉토리에 모든 백엔드 테스트 코드 구성
+- **프론트엔드 테스트**: `/frontend/tests/` 디렉토리에 프론트엔드 테스트 코드 구성
+- pytest 프레임워크 사용 (백엔드)
 - 단위 테스트, 통합 테스트, E2E 테스트 구분
 - 메일 발송 테스트는 별도 테스트 환경 사용
+- 테스트 파일 명명 규칙: `test_*.py` (예: `test_mail_api.py`, `test_auth.py`)
+- 테스트 클래스 명명 규칙: `Test*` (예: `TestMailAPI`, `TestUserAuth`)
 
 ### 8.2 테스트 커버리지
 - 핵심 비즈니스 로직 80% 이상 커버리지
@@ -254,11 +261,14 @@
 - 보안 기능 테스트
 
 ### 8.3 테스트 데이터
+- **백엔드 테스트 데이터**: `/backend/test/` 폴더 내에 테스트용 데이터 파일 구성
 - 실제 메일 시나리오를 반영한 테스트 데이터
-- 다양한 메일 형식 지원 테스트
-- 첨부파일 처리 테스트
-- 에러 시나리오 테스트
-- 성능 테스트 (대용량 메일 처리)
+- 다양한 메일 형식 지원 테스트 (HTML, 텍스트, 멀티파트)
+- 첨부파일 처리 테스트 (이미지, 문서, 압축파일)
+- 에러 시나리오 테스트 (잘못된 이메일 형식, 권한 오류 등)
+- 성능 테스트 (대용량 메일 처리, 동시 접속)
+- 테스트용 사용자 계정 및 메일 도메인 설정
+- Mock 데이터 및 Fixture 파일 관리
 
 ### 8.4 메일 서버 테스트
 - SMTP 연결 테스트
@@ -266,6 +276,14 @@
 - TLS/SSL 인증서 검증
 - 스팸 필터링 테스트
 - 백업/복구 테스트
+
+### 8.5 테스트 실행 방법
+- **백엔드 테스트 실행**: `cd backend && python -m pytest test/`
+- **특정 테스트 파일 실행**: `python -m pytest test/test_mail_api.py`
+- **테스트 커버리지 확인**: `python -m pytest test/ --cov=app --cov-report=html`
+- **테스트 결과 리포트**: `python -m pytest test/ --html=reports/report.html`
+- **병렬 테스트 실행**: `python -m pytest test/ -n auto` (pytest-xdist 필요)
+- **테스트 환경 변수**: `TEST_DATABASE_URL`, `TEST_REDIS_URL` 등 별도 설정
 
 ---
 

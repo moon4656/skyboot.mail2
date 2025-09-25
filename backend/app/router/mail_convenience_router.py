@@ -7,13 +7,14 @@ from datetime import datetime, timedelta
 import logging
 
 from ..database.base import get_db
-from ..model.base_model import User
+from ..model.user_model import User
 from ..model.mail_model import Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog
 from ..schemas.mail_schema import (
     MailSearchRequest, MailSearchResponse, MailStatsResponse, APIResponse,
     RecipientType, MailStatus, MailPriority, FolderType
 )
 from ..service.auth_service import get_current_user
+from ..middleware.tenant import get_current_org_id
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -27,21 +28,28 @@ router = APIRouter(tags=["mail-convenience"])
 async def search_mails(
     search_request: MailSearchRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> MailSearchResponse:
     """메일 검색"""
     try:
-        logger.info(f"User {current_user.email} is searching mails")
+        logger.info(f"📧 search_mails 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 기본 쿼리 - 사용자와 관련된 메일만
+        # 기본 쿼리 - 조직별 필터링 및 사용자와 관련된 메일만
         query = db.query(Mail).filter(
+            Mail.org_id == current_org_id,
             or_(
-                Mail.sender_id == mail_user.id,
+                Mail.sender_uuid == mail_user.id,
                 Mail.id.in_(
                     db.query(MailRecipient.mail_id).filter(
                         MailRecipient.recipient_id == mail_user.id
@@ -65,9 +73,9 @@ async def search_mails(
             sender_users = db.query(MailUser).filter(
                 MailUser.email.ilike(f"%{search_request.sender_email}%")
             ).all()
-            sender_ids = [user.id for user in sender_users]
-            if sender_ids:
-                query = query.filter(Mail.sender_id.in_(sender_ids))
+            sender_uuids = [user.id for user in sender_users]
+            if sender_uuids:
+                query = query.filter(Mail.sender_uuid.in_(sender_uuids))
             else:
                 # 발신자가 없으면 빈 결과 반환
                 query = query.filter(False)
@@ -121,7 +129,7 @@ async def search_mails(
         mail_list = []
         for mail in mails:
             # 발신자 정보
-            sender = db.query(MailUser).filter(MailUser.id == mail.sender_id).first()
+            sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
             sender_response = {
                 "id": sender.id if sender else 0,
                 "email": sender.email if sender else "Unknown",
@@ -161,6 +169,8 @@ async def search_mails(
         # 총 페이지 수 계산
         total_pages = (total_count + limit - 1) // limit
         
+        logger.info(f"✅ search_mails 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 검색 결과: {len(mail_list)}개")
+        
         return MailSearchResponse(
             mails=mail_list,
             total=total_count,
@@ -169,29 +179,38 @@ async def search_mails(
             total_pages=total_pages
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error searching mails: {str(e)}")
+        logger.error(f"❌ search_mails 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"메일 검색 중 오류가 발생했습니다: {str(e)}")
 
 
 @router.get("/stats", response_model=MailStatsResponse, summary="메일 통계")
 async def get_mail_stats(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> MailStatsResponse:
     """메일 통계 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching mail stats")
+        logger.info(f"📊 get_mail_stats 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 보낸 메일 수
+        # 보낸 메일 수 (조직별 필터링 추가)
         sent_count = db.query(Mail).filter(
             and_(
-                Mail.sender_id == mail_user.id,
+                Mail.org_id == current_org_id,
+                Mail.sender_uuid == mail_user.id,
                 Mail.status == MailStatus.SENT
             )
         ).count()
@@ -199,7 +218,7 @@ async def get_mail_stats(
         # 받은 메일 수 계산
         inbox_folder = db.query(MailFolder).filter(
             and_(
-                MailFolder.user_id == mail_user.id,
+                MailFolder.user_uuid == mail_user.user_uuid,
                 MailFolder.folder_type == FolderType.INBOX
             )
         ).first()
@@ -210,7 +229,10 @@ async def get_mail_stats(
             received_count = db.query(Mail).join(
                 MailInFolder, Mail.id == MailInFolder.mail_id
             ).filter(
-                MailInFolder.folder_id == inbox_folder.id
+                and_(
+                    Mail.org_id == current_org_id,
+                    MailInFolder.folder_id == inbox_folder.id
+                )
             ).count()
             
             # 읽지 않은 메일 수
@@ -220,16 +242,18 @@ async def get_mail_stats(
                 MailRecipient, Mail.id == MailRecipient.mail_id
             ).filter(
                 and_(
+                    Mail.org_id == current_org_id,
                     MailInFolder.folder_id == inbox_folder.id,
                     MailRecipient.recipient_id == mail_user.id,
                     MailRecipient.is_read == False
                 )
             ).count()
         
-        # 임시보관함 메일 수
+        # 임시보관함 메일 수 (조직별 필터링 추가)
         draft_count = db.query(Mail).filter(
             and_(
-                Mail.sender_id == mail_user.id,
+                Mail.org_id == current_org_id,
+                Mail.sender_uuid == mail_user.id,
                 Mail.status == MailStatus.DRAFT
             )
         ).count()
@@ -237,7 +261,7 @@ async def get_mail_stats(
         # 휴지통 메일 수
         trash_folder = db.query(MailFolder).filter(
             and_(
-                MailFolder.user_id == mail_user.id,
+                MailFolder.user_uuid == mail_user.user_uuid,
                 MailFolder.folder_type == FolderType.TRASH
             )
         ).first()
@@ -247,14 +271,17 @@ async def get_mail_stats(
             trash_count = db.query(Mail).join(
                 MailInFolder, Mail.id == MailInFolder.mail_id
             ).filter(
-                MailInFolder.folder_id == trash_folder.id
+                and_(
+                    Mail.org_id == current_org_id,
+                    MailInFolder.folder_id == trash_folder.id
+                )
             ).count()
         
         # 오늘 발송/수신 메일 수 계산
         today = datetime.now().date()
         today_sent = db.query(Mail).filter(
             and_(
-                Mail.sender_id == mail_user.id,
+                Mail.sender_uuid == mail_user.id,
                 Mail.status == MailStatus.SENT,
                 func.date(Mail.sent_at) == today
             )
@@ -282,14 +309,18 @@ async def get_mail_stats(
             today_received=today_received
         )
         
+        logger.info(f"✅ get_mail_stats 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 보낸메일: {sent_count}, 받은메일: {received_count}")
+        
         return MailStatsResponse(
             stats=stats,
             success=True,
             message="통계 조회 성공"
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching mail stats: {str(e)}")
+        logger.error(f"❌ get_mail_stats 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"메일 통계 조회 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -298,21 +329,27 @@ async def get_unread_mails(
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 메일 수"),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> APIResponse:
     """읽지 않은 메일만 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching unread mails")
+        logger.info(f"📧 get_unread_mails 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 받은편지함 폴더 조회
+        # 받은편지함 폴더 조회 (조직별 필터링 추가)
         inbox_folder = db.query(MailFolder).filter(
             and_(
-                MailFolder.user_id == mail_user.id,
+                MailFolder.user_uuid == mail_user.user_uuid,
                 MailFolder.folder_type == FolderType.INBOX
             )
         ).first()
@@ -330,13 +367,14 @@ async def get_unread_mails(
                 }
             )
         
-        # 읽지 않은 메일 쿼리
+        # 읽지 않은 메일 쿼리 (조직별 필터링 추가)
         query = db.query(Mail).join(
             MailInFolder, Mail.id == MailInFolder.mail_id
         ).join(
             MailRecipient, Mail.id == MailRecipient.mail_id
         ).filter(
             and_(
+                Mail.org_id == current_org_id,
                 MailInFolder.folder_id == inbox_folder.id,
                 MailRecipient.recipient_id == mail_user.id,
                 MailRecipient.is_read == False
@@ -354,7 +392,7 @@ async def get_unread_mails(
         mail_list = []
         for mail in mails:
             # 발신자 정보
-            sender = db.query(MailUser).filter(MailUser.id == mail.sender_id).first()
+            sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
             sender_email = sender.email if sender else "Unknown"
             
             # 수신자 정보
@@ -384,6 +422,8 @@ async def get_unread_mails(
                 "is_read": is_read
             })
         
+        logger.info(f"✅ get_unread_mails 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 읽지않은메일: {len(mail_list)}개")
+        
         return APIResponse(
             success=True,
             message="읽지 않은 메일 조회 성공",
@@ -396,8 +436,10 @@ async def get_unread_mails(
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching unread mails: {str(e)}")
+        logger.error(f"❌ get_unread_mails 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"읽지 않은 메일 조회 중 오류가 발생했습니다: {str(e)}",
@@ -416,22 +458,29 @@ async def get_starred_mails(
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 메일 수"),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> APIResponse:
     """중요 표시된 메일 조회"""
     try:
-        logger.info(f"User {current_user.email} is fetching starred mails")
+        logger.info(f"⭐ get_starred_mails 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 중요 표시된 메일 쿼리 (우선순위가 HIGH인 메일)
+        # 중요 표시된 메일 쿼리 (조직별 필터링 및 우선순위가 HIGH인 메일)
         query = db.query(Mail).filter(
             and_(
+                Mail.org_id == current_org_id,
                 or_(
-                    Mail.sender_id == mail_user.id,
+                    Mail.sender_uuid == mail_user.id,
                     Mail.id.in_(
                         db.query(MailRecipient.mail_id).filter(
                             MailRecipient.recipient_id == mail_user.id
@@ -453,7 +502,7 @@ async def get_starred_mails(
         mail_list = []
         for mail in mails:
             # 발신자 정보
-            sender = db.query(MailUser).filter(MailUser.id == mail.sender_id).first()
+            sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
             sender_email = sender.email if sender else "Unknown"
             
             # 수신자 정보
@@ -483,6 +532,8 @@ async def get_starred_mails(
                 "is_read": is_read
             })
         
+        logger.info(f"✅ get_starred_mails 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 중요메일: {len(mail_list)}개")
+        
         return APIResponse(
             success=True,
             message="중요 표시된 메일 조회 성공",
@@ -495,8 +546,10 @@ async def get_starred_mails(
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching starred mails: {str(e)}")
+        logger.error(f"❌ get_starred_mails 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"중요 표시된 메일 조회 중 오류가 발생했습니다: {str(e)}",
@@ -514,24 +567,35 @@ async def get_starred_mails(
 async def mark_mail_as_read(
     mail_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> APIResponse:
     """메일 읽음 처리"""
     try:
-        logger.info(f"User {current_user.email} is marking mail {mail_id} as read")
+        logger.info(f"📧 mark_mail_as_read 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
         
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.id == mail_id).first()
-        if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
+        
+        # 메일 조회 (조직별 필터링 추가)
+        mail = db.query(Mail).filter(
+            Mail.id == mail_id,
+            Mail.org_id == current_org_id
+        ).first()
+        
+        if not mail:
+            logger.warning(f"⚠️ 메일을 찾을 수 없음 - 조직: {current_org_id}, 메일ID: {mail_id}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일을 찾을 수 없습니다")
         
         # 권한 확인 (발신자이거나 수신자인지 확인)
-        is_sender = mail.sender_id == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.id
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_id == mail.id,
@@ -572,6 +636,8 @@ async def mark_mail_as_read(
         else:
             read_at = None
         
+        logger.info(f"✅ mark_mail_as_read 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        
         return APIResponse(
             success=True,
             message="메일이 읽음 처리되었습니다.",
@@ -582,9 +648,11 @@ async def mark_mail_as_read(
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
-        logger.error(f"Error marking mail as read: {str(e)}")
+        logger.error(f"❌ mark_mail_as_read 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"메일 읽음 처리 중 오류가 발생했습니다: {str(e)}",
@@ -596,24 +664,32 @@ async def mark_mail_as_read(
 async def mark_mail_as_unread(
     mail_id: str,
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> APIResponse:
     """메일 읽지 않음 처리"""
     try:
-        logger.info(f"User {current_user.email} is marking mail {mail_id} as unread")
+        logger.info(f"📧 mark_mail_as_unread 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
         
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.id == mail_id).first()
-        if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
-        
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 격리)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
+        
+        # 메일 조회 (조직별 격리)
+        mail = db.query(Mail).filter(
+            Mail.id == mail_id,
+            Mail.org_id == current_org_id
+        ).first()
+        if not mail:
+            raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
         
         # 권한 확인 (발신자이거나 수신자인지 확인)
-        is_sender = mail.sender_id == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.id
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_id == mail.id,
@@ -638,6 +714,8 @@ async def mark_mail_as_unread(
         db.add(log_entry)
         db.commit()
         
+        logger.info(f"✅ mark_mail_as_unread 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        
         return APIResponse(
             success=True,
             message="메일이 읽지 않음 처리되었습니다.",
@@ -649,7 +727,7 @@ async def mark_mail_as_unread(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Error marking mail as unread: {str(e)}")
+        logger.error(f"❌ mark_mail_as_unread 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"메일 읽지 않음 처리 중 오류가 발생했습니다: {str(e)}",
@@ -661,16 +739,21 @@ async def mark_mail_as_unread(
 async def mark_all_mails_as_read(
     folder_type: str = Query("inbox", description="폴더 타입 (inbox, sent, drafts, trash)"),
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> APIResponse:
     """모든 메일 읽음 처리"""
     try:
-        logger.info(f"User {current_user.email} is marking all mails as read in {folder_type}")
+        logger.info(f"📧 mark_all_mails_as_read 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더: {folder_type}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 격리)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
         # 폴더 타입에 따른 처리
         if folder_type == "inbox":
@@ -683,23 +766,25 @@ async def mark_all_mails_as_read(
             ).first()
             
             if folder:
-                # 받은편지함의 읽지 않은 메일들
+                # 받은편지함의 읽지 않은 메일들 (조직별 격리)
                 mails = db.query(Mail).join(
                     MailInFolder, Mail.id == MailInFolder.mail_id
                 ).filter(
                     and_(
                         MailInFolder.folder_id == folder.id,
-                        Mail.read_at.is_(None)
+                        Mail.read_at.is_(None),
+                        Mail.org_id == current_org_id
                     )
                 ).all()
         
         elif folder_type == "sent":
-            # 보낸 메일함의 읽지 않은 메일들
+            # 보낸 메일함의 읽지 않은 메일들 (조직별 격리)
             mails = db.query(Mail).filter(
                 and_(
-                    Mail.sender_id == mail_user.id,
+                    Mail.sender_uuid == mail_user.id,
                     Mail.status == MailStatus.SENT,
-                    Mail.read_at.is_(None)
+                    Mail.read_at.is_(None),
+                    Mail.org_id == current_org_id
                 )
             ).all()
         
@@ -729,6 +814,8 @@ async def mark_all_mails_as_read(
         
         db.commit()
         
+        logger.info(f"✅ mark_all_mails_as_read 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더: {folder_type}, 처리된 메일 수: {updated_count}")
+        
         return APIResponse(
             success=True,
             message=f"{updated_count}개의 메일이 읽음 처리되었습니다.",
@@ -740,7 +827,7 @@ async def mark_all_mails_as_read(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Error marking all mails as read: {str(e)}")
+        logger.error(f"❌ mark_all_mails_as_read 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더: {folder_type}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"모든 메일 읽음 처리 중 오류가 발생했습니다: {str(e)}",
@@ -752,24 +839,32 @@ async def mark_all_mails_as_read(
 async def star_mail(
     mail_id: str,
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> APIResponse:
     """메일 중요 표시"""
     try:
-        logger.info(f"User {current_user.email} is starring mail {mail_id}")
+        logger.info(f"📧 star_mail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
         
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.id == mail_id).first()
-        if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
-        
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 격리)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
+        
+        # 메일 조회 (조직별 격리)
+        mail = db.query(Mail).filter(
+            Mail.id == mail_id,
+            Mail.org_id == current_org_id
+        ).first()
+        if not mail:
+            raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
         
         # 권한 확인 (발신자이거나 수신자인지 확인)
-        is_sender = mail.sender_id == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.id
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_id == mail.id,
@@ -794,6 +889,8 @@ async def star_mail(
         db.add(log_entry)
         db.commit()
         
+        logger.info(f"✅ star_mail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        
         return APIResponse(
             success=True,
             message="메일이 중요 표시되었습니다.",
@@ -805,7 +902,7 @@ async def star_mail(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Error starring mail: {str(e)}")
+        logger.error(f"❌ star_mail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"메일 중요 표시 중 오류가 발생했습니다: {str(e)}",
@@ -817,24 +914,32 @@ async def star_mail(
 async def unstar_mail(
     mail_id: str,
     current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
-):
+) -> APIResponse:
     """메일 중요 표시 해제"""
     try:
-        logger.info(f"User {current_user.email} is unstarring mail {mail_id}")
+        logger.info(f"📧 unstar_mail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
         
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.id == mail_id).first()
-        if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
-        
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 격리)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
+        
+        # 메일 조회 (조직별 격리)
+        mail = db.query(Mail).filter(
+            Mail.id == mail_id,
+            Mail.org_id == current_org_id
+        ).first()
+        if not mail:
+            raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
         
         # 권한 확인 (발신자이거나 수신자인지 확인)
-        is_sender = mail.sender_id == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.id
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_id == mail.id,
@@ -859,6 +964,8 @@ async def unstar_mail(
         db.add(log_entry)
         db.commit()
         
+        logger.info(f"✅ unstar_mail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        
         return APIResponse(
             success=True,
             message="메일 중요 표시가 해제되었습니다.",
@@ -870,7 +977,7 @@ async def unstar_mail(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Error unstarring mail: {str(e)}")
+        logger.error(f"❌ unstar_mail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"메일 중요 표시 해제 중 오류가 발생했습니다: {str(e)}",
@@ -883,32 +990,38 @@ async def get_search_suggestions(
     query: str = Query(..., min_length=1, description="검색어"),
     limit: int = Query(10, ge=1, le=20, description="제안 개수"),
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> APIResponse:
     """검색 자동완성"""
     try:
-        logger.info(f"User {current_user.email} is getting search suggestions for: {query}")
+        logger.info(f"🔍 get_search_suggestions 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 검색어: {query}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_id == current_user.id).first()
+        # 메일 사용자 조회 (조직별 필터링 추가)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.id,
+            MailUser.org_id == current_org_id
+        ).first()
+        
         if not mail_user:
-            raise HTTPException(status_code=404, detail="Mail user not found")
+            logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
+            raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
         suggestions = []
         
-        # 제목 기반 제안
+        # 제목에서 검색 (조직별 필터링 추가)
         subject_suggestions = db.query(Mail.subject).filter(
             and_(
+                Mail.org_id == current_org_id,
                 or_(
-                    Mail.sender_id == mail_user.id,
+                    Mail.sender_uuid == mail_user.id,
                     Mail.id.in_(
                         db.query(MailRecipient.mail_id).filter(
                             MailRecipient.recipient_id == mail_user.id
                         )
                     )
                 ),
-                Mail.subject.ilike(f"%{query}%"),
-                Mail.subject.is_not(None)
+                Mail.subject.ilike(f"%{query}%")
             )
         ).distinct().limit(limit // 2).all()
         
@@ -920,17 +1033,18 @@ async def get_search_suggestions(
                     "category": "제목"
                 })
         
-        # 발신자 기반 제안
+        # 발신자 기반 제안 (조직별 필터링 추가)
         sender_suggestions = db.query(MailUser.email).join(
-            Mail, Mail.sender_id == MailUser.id
+            Mail, Mail.sender_uuid == MailUser.user_uuid
         ).filter(
             and_(
+                Mail.org_id == current_org_id,
                 MailUser.email.ilike(f"%{query}%"),
                 or_(
-                    Mail.sender_id == mail_user.id,
+                    Mail.sender_uuid == mail_user.id,
                     Mail.id.in_(
                         db.query(MailRecipient.mail_id).filter(
-                            MailRecipient.email == mail_user.email
+                            MailRecipient.recipient_id == mail_user.id
                         )
                     )
                 )
@@ -945,13 +1059,14 @@ async def get_search_suggestions(
                     "category": "발신자"
                 })
         
-        # 수신자 기반 제안
+        # 수신자 기반 제안 (조직별 필터링 추가)
         recipient_suggestions = db.query(MailRecipient.email).join(
             Mail, Mail.id == MailRecipient.mail_id
         ).filter(
             and_(
+                Mail.org_id == current_org_id,
                 MailRecipient.email.ilike(f"%{query}%"),
-                Mail.sender_id == mail_user.id
+                Mail.sender_uuid == mail_user.id
             )
         ).distinct().limit(limit // 2).all()
         
@@ -966,6 +1081,8 @@ async def get_search_suggestions(
         # 제한된 개수만 반환
         suggestions = suggestions[:limit]
         
+        logger.info(f"✅ get_search_suggestions 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 검색어: {query}, 제안 수: {len(suggestions)}")
+        
         return APIResponse(
             success=True,
             message="검색 제안 조회 성공",
@@ -976,8 +1093,10 @@ async def get_search_suggestions(
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error getting search suggestions: {str(e)}")
+        logger.error(f"❌ get_search_suggestions 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 검색어: {query}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"검색 제안 조회 중 오류가 발생했습니다: {str(e)}",

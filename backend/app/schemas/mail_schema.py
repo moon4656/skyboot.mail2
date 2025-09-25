@@ -42,7 +42,7 @@ class MailUserCreate(MailUserBase):
 
 class MailUserResponse(MailUserBase):
     """메일 사용자 응답 스키마"""
-    id: str
+    user_id: str
     user_uuid: str
     created_at: datetime
     updated_at: datetime
