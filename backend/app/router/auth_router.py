@@ -25,9 +25,18 @@ async def register(
     """
     # 조직 ID를 선택적으로 가져오기 (없으면 기본 조직 사용)
     try:
-        org_id = getattr(request.state, 'org_id', 'default')
+        org_id = getattr(request.state, 'org_id', None)
     except AttributeError:
-        org_id = 'default'
+        org_id = None
+    
+    # 조직 ID가 없으면 첫 번째 조직을 기본 조직으로 사용
+    if not org_id:
+        from app.model.organization_model import Organization
+        default_org = db.query(Organization).first()
+        if default_org:
+            org_id = default_org.org_id
+        else:
+            raise HTTPException(status_code=500, detail="No organization found")
     
     logger.info(f"📝 사용자 등록 시작 - 조직: {org_id}, 이메일: {user_data.email}")
     
@@ -57,6 +66,7 @@ async def register(
         # 새 사용자 생성
         hashed_password = AuthService.get_password_hash(user_data.password)
         new_user = User(
+            user_id=user_data.user_id,
             org_id=org_id,
             email=user_data.email,
             username=user_data.username,
@@ -70,7 +80,7 @@ async def register(
         db.commit()
         db.refresh(new_user)
         
-        logger.info(f"✅ 사용자 등록 완료 - 조직: {org_id}, 사용자: {new_user.id}")
+        logger.info(f"✅ 사용자 등록 완료 - 조직: {org_id}, 사용자: {new_user.user_id}")
         return new_user
         
     except HTTPException:
@@ -144,7 +154,7 @@ async def login(
         
         # 리프레시 토큰 저장
         refresh_token_obj = RefreshToken(
-            user_id=user.id,
+            user_id=user.user_id,
             token=refresh_token,
             expires_at=datetime.utcnow() + refresh_token_expires
         )
@@ -165,7 +175,7 @@ async def login(
         db.add(login_log)
         db.commit()
         
-        logger.info(f"✅ 로그인 성공 - 조직: {org_id}, 사용자: {user.id}")
+        logger.info(f"✅ 로그인 성공 - 조직: {org_id}, 사용자: {user.user_id}")
         
         return {
             "access_token": access_token,

@@ -199,8 +199,9 @@ async def rate_limit_middleware(request: Request, call_next: Callable):
         # 다음 미들웨어/핸들러 호출
         response = await call_next(request)
         
-        # 응답 헤더에 속도 제한 정보 추가
-        rate_limit_service._add_rate_limit_headers(response, limit_info)
+        # 응답 헤더에 속도 제한 정보 추가 (limit_info가 있을 때만)
+        if limit_info:
+            rate_limit_service._add_rate_limit_headers(response, limit_info)
         
         # 처리 시간 로깅
         process_time = time.time() - start_time

@@ -47,7 +47,7 @@ async def get_folders(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_id,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -57,7 +57,7 @@ async def get_folders(
         
         # 폴더 조회 (조직별 필터링 추가)
         folders = db.query(MailFolder).filter(
-            MailFolder.user_id == mail_user.id,
+            MailFolder.user_id == mail_user.user_id,
             MailFolder.org_id == current_org_id
         ).all()
         
@@ -98,7 +98,7 @@ async def create_folder(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_id,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -108,7 +108,7 @@ async def create_folder(
         
         # 폴더명 중복 확인 (조직별 필터링 추가)
         existing_folder = db.query(MailFolder).filter(
-            MailFolder.user_id == mail_user.id,
+            MailFolder.user_id == mail_user.user_id,
             MailFolder.org_id == current_org_id,
             MailFolder.name == folder_data.get('name')
         ).first()
@@ -118,7 +118,7 @@ async def create_folder(
         
         # 새 폴더 생성 (조직 ID 추가)
         new_folder = MailFolder(
-            user_id=mail_user.id,
+            user_id=mail_user.user_id,
             org_id=current_org_id,
             name=folder_data.get('name'),
             folder_type=folder_data.get('folder_type', 'custom')
@@ -160,7 +160,7 @@ async def update_folder(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_id,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -172,7 +172,7 @@ async def update_folder(
         folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.id == folder_id,
-                MailFolder.user_id == mail_user.id,
+                MailFolder.user_id == mail_user.user_id,
                 MailFolder.org_id == current_org_id
             )
         ).first()
@@ -188,7 +188,7 @@ async def update_folder(
         if folder_data.get('name') and folder_data.get('name') != folder.name:
             existing_folder = db.query(MailFolder).filter(
                 and_(
-                    MailFolder.user_id == mail_user.id,
+                    MailFolder.user_id == mail_user.user_id,
                     MailFolder.org_id == current_org_id,
                     MailFolder.name == folder_data.get('name'),
                     MailFolder.id != folder_id
@@ -240,7 +240,7 @@ async def delete_folder(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_id,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -252,7 +252,7 @@ async def delete_folder(
         folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.id == folder_id,
-                MailFolder.user_id == mail_user.id,
+                MailFolder.user_id == mail_user.user_id,
                 MailFolder.org_id == current_org_id
             )
         ).first()
@@ -267,7 +267,7 @@ async def delete_folder(
         # 폴더 내 메일들을 받은편지함으로 이동 (조직별 필터링 추가)
         inbox_folder = db.query(MailFolder).filter(
             and_(
-                MailFolder.user_id == mail_user.id,
+                MailFolder.user_id == mail_user.user_id,
                 MailFolder.org_id == current_org_id,
                 MailFolder.folder_type == 'inbox'
             )
@@ -319,7 +319,7 @@ async def move_mail_to_folder(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_id,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -331,7 +331,7 @@ async def move_mail_to_folder(
         folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.id == folder_id,
-                MailFolder.user_id == mail_user.id,
+                MailFolder.user_id == mail_user.user_id,
                 MailFolder.org_id == current_org_id
             )
         ).first()
@@ -341,7 +341,7 @@ async def move_mail_to_folder(
         
         # 메일 조회 (조직별 필터링 추가)
         mail = db.query(Mail).filter(
-            Mail.id == mail_id,
+            Mail.mail_id == mail_id,
             Mail.org_id == current_org_id
         ).first()
         
@@ -349,11 +349,11 @@ async def move_mail_to_folder(
             raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
         
         # 권한 확인
-        is_sender = mail.sender_uuid == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.user_id
         is_recipient = db.query(MailRecipient).filter(
             and_(
-                MailRecipient.mail_id == mail.id,
-                MailRecipient.recipient_id == mail_user.id
+                MailRecipient.mail_id == mail.mail_id,
+                MailRecipient.recipient_id == mail_user.user_id
             )
         ).first() is not None
         
@@ -382,8 +382,8 @@ async def move_mail_to_folder(
         
         # 로그 기록
         log_entry = MailLog(
-            mail_id=mail.id,
-            user_id=current_user.id,
+            mail_id=mail.mail_id,
+            user_id=current_user.user_id,
             action=f"moved_to_folder_{folder.name}",
             timestamp=datetime.utcnow()
         )
@@ -434,7 +434,7 @@ async def backup_mails(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_id,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -447,10 +447,10 @@ async def backup_mails(
             and_(
                 Mail.org_id == current_org_id,
                 or_(
-                    Mail.sender_uuid == mail_user.id,
-                    Mail.id.in_(
+                    Mail.sender_uuid == mail_user.user_id,
+                    Mail.mail_id.in_(
                         db.query(MailRecipient.mail_id).filter(
-                            MailRecipient.recipient_id == mail_user.id
+                            MailRecipient.recipient_id == mail_user.user_id
                         )
                     )
                 )
@@ -479,13 +479,13 @@ async def backup_mails(
                 sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
                 
                 # 수신자 정보
-                recipients = db.query(MailRecipient).filter(MailRecipient.mail_id == mail.id).all()
+                recipients = db.query(MailRecipient).filter(MailRecipient.mail_id == mail.mail_id).all()
                 
                 # 첨부파일 정보
-                attachments = db.query(MailAttachment).filter(MailAttachment.mail_id == mail.id).all()
+                attachments = db.query(MailAttachment).filter(MailAttachment.mail_id == mail.mail_id).all()
                 
                 mail_info = {
-                    "id": mail.id,
+                    "id": mail.mail_id,
                     "subject": mail.subject,
                     "content": mail.body_text,
                     "sender_email": sender.email if sender else None,
@@ -517,7 +517,7 @@ async def backup_mails(
                     for attachment in attachments:
                         if attachment.file_path and os.path.exists(attachment.file_path):
                             # ZIP 내 경로 설정
-                            zip_path = f"attachments/{mail.id}/{attachment.filename}"
+                            zip_path = f"attachments/{mail.mail_id}/{attachment.filename}"
                             zipf.write(attachment.file_path, zip_path)
             
             # 메일 데이터를 JSON 파일로 추가
@@ -602,7 +602,7 @@ async def restore_mails(
         
         # 메일 사용자 조회 (조직별 격리)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_id == current_user.id,
+            MailUser.user_id == current_user.mail_id,
             MailUser.org_id == current_org_id
         ).first()
         if not mail_user:
@@ -630,7 +630,7 @@ async def restore_mails(
                     try:
                         # 기존 메일 확인 (조직별 격리)
                         existing_mail = db.query(Mail).filter(
-                            Mail.id == mail_info['id'],
+                            Mail.mail_id == mail_info['mail_id'],
                             Mail.org_id == current_org_id
                         ).first()
                         
@@ -655,7 +655,7 @@ async def restore_mails(
                                 id=mail_info['id'],
                                 subject=mail_info['subject'],
                                 content=mail_info['content'],
-                                sender_uuid=mail_user.id,  # 현재 사용자로 설정
+                                sender_uuid=mail_user.user_id,  # 현재 사용자로 설정
                                 org_id=current_org_id,  # 조직 ID 설정
                                 status=mail_info['status'],
                                 priority=mail_info['priority'],
@@ -722,7 +722,7 @@ async def get_mail_analytics(
         
         # 메일 사용자 조회 (조직별 격리)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_id == current_user.id,
+            MailUser.user_id == current_user.user_id,
             MailUser.org_id == current_org_id
         ).first()
         if not mail_user:
@@ -742,7 +742,7 @@ async def get_mail_analytics(
         # 보낸 메일 통계 (조직별 격리)
         sent_mails = db.query(Mail).filter(
             and_(
-                Mail.sender_uuid == mail_user.id,
+                Mail.sender_uuid == mail_user.user_id,
                 Mail.org_id == current_org_id,
                 Mail.created_at >= start_date,
                 Mail.status == 'sent'
@@ -751,10 +751,10 @@ async def get_mail_analytics(
         
         # 받은 메일 통계 (조직별 격리)
         received_mails = db.query(Mail).join(
-            MailRecipient, Mail.id == MailRecipient.mail_id
+            MailRecipient, Mail.mail_id == MailRecipient.mail_id
         ).filter(
             and_(
-                MailRecipient.recipient_id == mail_user.id,
+                MailRecipient.recipient_id == mail_user.user_id,
                 Mail.org_id == current_org_id,
                 Mail.created_at >= start_date
             )
@@ -807,7 +807,7 @@ async def get_mail_analytics(
                 sender_stats[sender_email] = sender_stats.get(sender_email, 0) + 1
         
         for mail in sent_mails:
-            recipients = db.query(MailRecipient).filter(MailRecipient.mail_id == mail.id).all()
+            recipients = db.query(MailRecipient).filter(MailRecipient.mail_id == mail.mail_id).all()
             for recipient in recipients:
                 recipient_email = recipient.email
                 recipient_stats[recipient_email] = recipient_stats.get(recipient_email, 0) + 1

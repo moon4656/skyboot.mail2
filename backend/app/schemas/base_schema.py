@@ -4,6 +4,7 @@ from datetime import datetime
 
 class UserBase(BaseModel):
     """사용자 기본 스키마"""
+    user_id: str = Field(..., description="사용자 ID")
     email: EmailStr = Field(..., description="이메일 주소")
     username: str = Field(..., min_length=3, max_length=100, description="사용자명")
 
@@ -13,7 +14,6 @@ class UserCreate(UserBase):
 
 class UserResponse(UserBase):
     """사용자 응답 스키마"""
-    id: str = Field(..., description="사용자 ID")
     user_uuid: str = Field(..., description="사용자 UUID")
     is_active: bool = Field(..., description="활성 상태")
     created_at: datetime = Field(..., description="생성 시간")
@@ -24,7 +24,7 @@ class UserResponse(UserBase):
 
 class UserLogin(BaseModel):
     """사용자 로그인 스키마"""
-    email: EmailStr = Field(..., description="이메일 주소")
+    email: str = Field(..., description="이메일 주소")
     password: str = Field(..., description="비밀번호")
 
 class Token(BaseModel):
@@ -57,6 +57,7 @@ class ErrorResponse(BaseModel):
 
 class LoginLogCreate(BaseModel):
     """로그인 로그 생성 스키마"""
+    user_id: Optional[str] = Field(None, description="사용자 ID (로그인 성공 시)")
     user_uuid: Optional[str] = Field(None, description="사용자 UUID (로그인 성공 시)")
     email: str = Field(..., description="로그인 시도 이메일")
     ip_address: Optional[str] = Field(None, description="클라이언트 IP 주소")

@@ -147,7 +147,8 @@ class MailFolder(Base):
     """메일 폴더 모델"""
     __tablename__ = "mail_folders"
     
-    user_id = Column(String(50), primary_key=True, index=True, comment="사용자 ID")
+    id = Column(Integer, primary_key=True, index=True, comment="폴더 ID")
+    user_id = Column(String(50), ForeignKey("mail_users.user_id"), nullable=False, index=True, comment="사용자 ID")
     name = Column(String(100), nullable=False, comment="폴더명")
     folder_type = Column(SQLEnum(FolderType), default=FolderType.CUSTOM, comment="폴더 타입")
     parent_id = Column(Integer, ForeignKey("mail_folders.id"), comment="상위 폴더 ID")

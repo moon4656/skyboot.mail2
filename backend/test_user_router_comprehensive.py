@@ -1,750 +1,484 @@
-#!/usr/bin/env python3
 """
-User Router 포괄적 테스트 스크립트
-각 엔드포인트별 체크리스트를 기반으로 한 체계적인 테스트
-"""
+User Router 종합 테스트 스크립트
 
+모든 엔드포인트의 기능, 권한, 데이터 검증을 테스트합니다.
+"""
 import asyncio
 import json
-import requests
-import time
-from datetime import datetime
-from typing import Dict, Any, List, Optional
 import logging
+from datetime import datetime
+from typing import Dict, Any, Optional
+import aiohttp
+import sys
+import os
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-class UserRouterComprehensiveTester:
-    def __init__(self):
-        self.base_url = "http://127.0.0.1:8000"
-        self.api_prefix = "/api/v1/users"
+class UserRouterTester:
+    def __init__(self, base_url: str = "http://127.0.0.1:8000"):
+        self.base_url = base_url
+        self.session = None
         self.admin_token = None
         self.user_token = None
         self.test_results = []
-        self.created_users = []  # 테스트 중 생성된 사용자 추적
+        self.created_user_id = None
         
-        # 테스트 데이터
-        self.test_admin = {
-            "email": "test_admin@example.com",
-            "password": "admin123!@#"
-        }
-        self.test_user = {
-            "email": "test_user@example.com", 
-            "password": "user123!@#"
-        }
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession()
+        return self
         
-    def log_test_result(self, test_name: str, success: bool, details: str, response_data: Any = None):
-        """테스트 결과를 로깅하고 저장"""
-        status = "✅ PASS" if success else "❌ FAIL"
-        logger.info(f"{status} {test_name}: {details}")
-        
-        self.test_results.append({
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
+    
+    def log_test_result(self, test_name: str, success: bool, details: str = "", response_data: Any = None):
+        """테스트 결과 로깅"""
+        result = {
             "test_name": test_name,
             "success": success,
             "details": details,
-            "response_data": response_data,
-            "timestamp": datetime.now().isoformat()
-        })
-    
-    def setup_tokens(self):
-        """관리자 및 일반 사용자 토큰 설정"""
-        logger.info("🔑 토큰 설정 시작...")
+            "timestamp": datetime.now().isoformat(),
+            "response_data": response_data
+        }
+        self.test_results.append(result)
         
-        # 관리자 토큰 획득 시도
-        try:
-            admin_login_data = {
-                "username": self.test_admin["email"],
-                "password": self.test_admin["password"]
-            }
-            
-            response = requests.post(
-                f"{self.base_url}/api/v1/auth/login",
-                data=admin_login_data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
-            
-            if response.status_code == 200:
-                self.admin_token = response.json()["access_token"]
-                logger.info("✅ 관리자 토큰 획득 성공")
-            else:
-                logger.warning(f"⚠️ 관리자 로그인 실패: {response.status_code}")
-                self.admin_token = "fake_admin_token"  # 테스트용 가짜 토큰
-                
-        except Exception as e:
-            logger.warning(f"⚠️ 관리자 토큰 설정 오류: {e}")
-            self.admin_token = "fake_admin_token"
-        
-        # 일반 사용자 토큰 획득 시도
-        try:
-            user_login_data = {
-                "username": self.test_user["email"],
-                "password": self.test_user["password"]
-            }
-            
-            response = requests.post(
-                f"{self.base_url}/api/v1/auth/login",
-                data=user_login_data,
-                headers={"Content-Type": "application/x-www-form-urlencoded"}
-            )
-            
-            if response.status_code == 200:
-                self.user_token = response.json()["access_token"]
-                logger.info("✅ 일반 사용자 토큰 획득 성공")
-            else:
-                logger.warning(f"⚠️ 일반 사용자 로그인 실패: {response.status_code}")
-                self.user_token = "fake_user_token"  # 테스트용 가짜 토큰
-                
-        except Exception as e:
-            logger.warning(f"⚠️ 일반 사용자 토큰 설정 오류: {e}")
-            self.user_token = "fake_user_token"
+        status = "✅ PASS" if success else "❌ FAIL"
+        logger.info(f"{status} {test_name}: {details}")
     
-    def get_headers(self, token: str = None) -> Dict[str, str]:
-        """인증 헤더 생성"""
-        headers = {"Content-Type": "application/json"}
+    async def make_request(self, method: str, endpoint: str, token: str = None, 
+                          data: Dict = None, params: Dict = None) -> tuple:
+        """HTTP 요청 실행"""
+        url = f"{self.base_url}{endpoint}"
+        headers = {}
+        
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        return headers
-    
-    # 1. POST / - 사용자 생성 테스트
-    def test_create_user(self):
-        """사용자 생성 엔드포인트 테스트"""
-        logger.info("🧪 사용자 생성 테스트 시작...")
         
-        # 1-1. 관리자 토큰으로 정상 사용자 생성 (200)
-        test_user_data = {
-            "email": f"new_user_{int(time.time())}@example.com",
-            "name": "테스트 사용자",
-            "password": "newuser123!@#",
-            "is_admin": False
+        try:
+            async with self.session.request(
+                method, url, json=data, params=params, headers=headers
+            ) as response:
+                try:
+                    response_data = await response.json()
+                except:
+                    response_data = await response.text()
+                
+                return response.status, response_data
+        except Exception as e:
+            return 0, str(e)
+    
+    async def setup_test_environment(self):
+        """테스트 환경 설정 - 관리자 및 일반 사용자 토큰 획득"""
+        logger.info("🔧 테스트 환경 설정 중...")
+        
+        # 관리자 로그인 시도
+        admin_login_data = {
+            "email": "admin@test.com",
+            "password": "testpassword123"
         }
         
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/",
-                json=test_user_data,
-                headers=self.get_headers(self.admin_token)
-            )
+        status, response = await self.make_request("POST", "/api/v1/auth/login", data=admin_login_data)
+        if status == 200 and "access_token" in response:
+            self.admin_token = response["access_token"]
+            self.log_test_result("관리자 로그인", True, "기존 관리자 계정으로 로그인 성공")
+        else:
+            # 관리자 계정이 없으면 생성
+            logger.info("🔧 관리자 계정 생성 중...")
+            import time
+            unique_suffix = str(int(time.time()))
+            admin_register_data = {
+                "user_id": f"admin_test_{unique_suffix}",
+                "username": f"admin_test_{unique_suffix}",
+                "email": "admin@test.com",
+                "password": "testpassword123"
+            }
             
-            if response.status_code == 200:
-                created_user = response.json()
-                self.created_users.append(created_user.get("id"))
-                self.log_test_result(
-                    "사용자 생성 - 관리자 권한",
-                    True,
-                    f"사용자 생성 성공: {test_user_data['email']}",
-                    created_user
-                )
+            status, response = await self.make_request("POST", "/api/v1/auth/register", data=admin_register_data)
+            if status in [200, 201]:
+                # 회원가입 후 로그인
+                status, response = await self.make_request("POST", "/api/v1/auth/login", data=admin_login_data)
+                if status == 200 and "access_token" in response:
+                    self.admin_token = response["access_token"]
+                    self.log_test_result("관리자 계정 생성 및 로그인", True, "새 관리자 계정 생성 및 로그인 성공")
+                else:
+                    self.log_test_result("관리자 로그인", False, f"Status: {status}, Response: {response}")
+                    return False
             else:
-                self.log_test_result(
-                    "사용자 생성 - 관리자 권한",
-                    False,
-                    f"예상 상태코드 200, 실제: {response.status_code}",
-                    response.text
-                )
-        except Exception as e:
-            self.log_test_result("사용자 생성 - 관리자 권한", False, f"요청 오류: {e}")
+                self.log_test_result("관리자 계정 생성", False, f"Status: {status}, Response: {response}")
+                return False
         
-        # 1-2. 일반 사용자 토큰으로 접근 시 권한 오류 (403)
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/",
-                json=test_user_data,
-                headers=self.get_headers(self.user_token)
-            )
-            
-            success = response.status_code == 403
-            self.log_test_result(
-                "사용자 생성 - 일반 사용자 권한 거부",
-                success,
-                f"예상 상태코드 403, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("사용자 생성 - 일반 사용자 권한 거부", False, f"요청 오류: {e}")
-        
-        # 1-3. 토큰 없이 접근 시 인증 오류 (401)
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/",
-                json=test_user_data
-            )
-            
-            success = response.status_code == 401
-            self.log_test_result(
-                "사용자 생성 - 인증 없음",
-                success,
-                f"예상 상태코드 401, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("사용자 생성 - 인증 없음", False, f"요청 오류: {e}")
-        
-        # 1-4. 필수 필드 누락 시 검증 오류 (422)
-        invalid_data = {"name": "테스트"}  # email, password 누락
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/",
-                json=invalid_data,
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            success = response.status_code == 422
-            self.log_test_result(
-                "사용자 생성 - 필수 필드 누락",
-                success,
-                f"예상 상태코드 422, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("사용자 생성 - 필수 필드 누락", False, f"요청 오류: {e}")
-    
-    # 2. GET / - 사용자 목록 조회 테스트
-    def test_get_users(self):
-        """사용자 목록 조회 엔드포인트 테스트"""
-        logger.info("🧪 사용자 목록 조회 테스트 시작...")
-        
-        # 2-1. 관리자 토큰으로 사용자 목록 조회 (200)
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/",
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            if response.status_code == 200:
-                users_data = response.json()
-                self.log_test_result(
-                    "사용자 목록 조회 - 관리자 권한",
-                    True,
-                    f"사용자 목록 조회 성공, 총 {len(users_data.get('items', []))}명",
-                    {"total_count": len(users_data.get('items', []))}
-                )
-            else:
-                self.log_test_result(
-                    "사용자 목록 조회 - 관리자 권한",
-                    False,
-                    f"예상 상태코드 200, 실제: {response.status_code}",
-                    response.text
-                )
-        except Exception as e:
-            self.log_test_result("사용자 목록 조회 - 관리자 권한", False, f"요청 오류: {e}")
-        
-        # 2-2. 일반 사용자 토큰으로 접근 시 권한 오류 (403)
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/",
-                headers=self.get_headers(self.user_token)
-            )
-            
-            success = response.status_code == 403
-            self.log_test_result(
-                "사용자 목록 조회 - 일반 사용자 권한 거부",
-                success,
-                f"예상 상태코드 403, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("사용자 목록 조회 - 일반 사용자 권한 거부", False, f"요청 오류: {e}")
-        
-        # 2-3. 페이지네이션 파라미터 테스트
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/?page=1&limit=5",
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            success = response.status_code == 200
-            self.log_test_result(
-                "사용자 목록 조회 - 페이지네이션",
-                success,
-                f"페이지네이션 테스트, 상태코드: {response.status_code}",
-                response.json() if success else response.text
-            )
-        except Exception as e:
-            self.log_test_result("사용자 목록 조회 - 페이지네이션", False, f"요청 오류: {e}")
-    
-    # 3. GET /me - 현재 사용자 정보 조회 테스트
-    def test_get_current_user(self):
-        """현재 사용자 정보 조회 엔드포인트 테스트"""
-        logger.info("🧪 현재 사용자 정보 조회 테스트 시작...")
-        
-        # 3-1. 유효한 토큰으로 본인 정보 조회 (200)
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/me",
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            if response.status_code == 200:
-                user_data = response.json()
-                self.log_test_result(
-                    "현재 사용자 조회 - 유효한 토큰",
-                    True,
-                    f"사용자 정보 조회 성공: {user_data.get('email', 'N/A')}",
-                    {"email": user_data.get("email")}
-                )
-            else:
-                self.log_test_result(
-                    "현재 사용자 조회 - 유효한 토큰",
-                    False,
-                    f"예상 상태코드 200, 실제: {response.status_code}",
-                    response.text
-                )
-        except Exception as e:
-            self.log_test_result("현재 사용자 조회 - 유효한 토큰", False, f"요청 오류: {e}")
-        
-        # 3-2. 토큰 없이 접근 시 인증 오류 (401)
-        try:
-            response = requests.get(f"{self.base_url}{self.api_prefix}/me")
-            
-            success = response.status_code == 401
-            self.log_test_result(
-                "현재 사용자 조회 - 인증 없음",
-                success,
-                f"예상 상태코드 401, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("현재 사용자 조회 - 인증 없음", False, f"요청 오류: {e}")
-        
-        # 3-3. 잘못된 토큰으로 접근 시 오류 (401)
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/me",
-                headers=self.get_headers("invalid_token")
-            )
-            
-            success = response.status_code == 401
-            self.log_test_result(
-                "현재 사용자 조회 - 잘못된 토큰",
-                success,
-                f"예상 상태코드 401, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("현재 사용자 조회 - 잘못된 토큰", False, f"요청 오류: {e}")
-    
-    # 4. GET /{user_id} - 특정 사용자 조회 테스트
-    def test_get_user_by_id(self):
-        """특정 사용자 조회 엔드포인트 테스트"""
-        logger.info("🧪 특정 사용자 조회 테스트 시작...")
-        
-        test_user_id = 1  # 테스트용 사용자 ID
-        
-        # 4-1. 관리자가 다른 사용자 조회 (200)
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}",
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            success = response.status_code in [200, 404]  # 사용자가 존재하지 않을 수도 있음
-            self.log_test_result(
-                "특정 사용자 조회 - 관리자 권한",
-                success,
-                f"상태코드: {response.status_code}",
-                response.json() if response.status_code == 200 else response.text
-            )
-        except Exception as e:
-            self.log_test_result("특정 사용자 조회 - 관리자 권한", False, f"요청 오류: {e}")
-        
-        # 4-2. 일반 사용자가 다른 사용자 조회 시 권한 오류 (403)
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}",
-                headers=self.get_headers(self.user_token)
-            )
-            
-            success = response.status_code in [403, 404]  # 권한 오류 또는 사용자 없음
-            self.log_test_result(
-                "특정 사용자 조회 - 일반 사용자 권한 거부",
-                success,
-                f"상태코드: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("특정 사용자 조회 - 일반 사용자 권한 거부", False, f"요청 오류: {e}")
-        
-        # 4-3. 존재하지 않는 사용자 ID 조회 (404)
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/99999",
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            success = response.status_code == 404
-            self.log_test_result(
-                "특정 사용자 조회 - 존재하지 않는 ID",
-                success,
-                f"예상 상태코드 404, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("특정 사용자 조회 - 존재하지 않는 ID", False, f"요청 오류: {e}")
-    
-    # 5. PUT /{user_id} - 사용자 정보 수정 테스트
-    def test_update_user(self):
-        """사용자 정보 수정 엔드포인트 테스트"""
-        logger.info("🧪 사용자 정보 수정 테스트 시작...")
-        
-        test_user_id = 1
-        update_data = {
-            "name": "수정된 이름",
-            "email": f"updated_{int(time.time())}@example.com"
+        # 일반 사용자 생성 및 로그인
+        user_create_data = {
+            "email": "testuser@test.com",
+            "username": "testuser",
+            "password": "testpass123",
+            "full_name": "테스트 사용자"
         }
         
-        # 5-1. 관리자가 다른 사용자 정보 수정
-        try:
-            response = requests.put(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}",
-                json=update_data,
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            success = response.status_code in [200, 404]
-            self.log_test_result(
-                "사용자 정보 수정 - 관리자 권한",
-                success,
-                f"상태코드: {response.status_code}",
-                response.json() if response.status_code == 200 else response.text
-            )
-        except Exception as e:
-            self.log_test_result("사용자 정보 수정 - 관리자 권한", False, f"요청 오류: {e}")
+        # 기존 사용자 삭제 시도 (있을 경우)
+        await self.make_request("DELETE", "/api/users/999", token=self.admin_token)
         
-        # 5-2. 일반 사용자가 다른 사용자 수정 시 권한 오류
-        try:
-            response = requests.put(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}",
-                json=update_data,
-                headers=self.get_headers(self.user_token)
-            )
-            
-            success = response.status_code in [403, 404]
-            self.log_test_result(
-                "사용자 정보 수정 - 일반 사용자 권한 거부",
-                success,
-                f"상태코드: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("사용자 정보 수정 - 일반 사용자 권한 거부", False, f"요청 오류: {e}")
+        # 새 사용자 생성
+        status, response = await self.make_request("POST", "/api/users/", token=self.admin_token, data=user_create_data)
+        if status == 201:
+            self.created_user_id = response.get("id")
+            self.log_test_result("테스트 사용자 생성", True, f"사용자 ID: {self.created_user_id}")
+        else:
+            self.log_test_result("테스트 사용자 생성", False, f"Status: {status}, Response: {response}")
+        
+        # 일반 사용자 로그인
+        user_login_data = {
+            "email": "testuser@test.com",
+            "password": "testpass123"
+        }
+        
+        status, response = await self.make_request("POST", "/api/v1/auth/login", data=user_login_data)
+        if status == 200 and "access_token" in response:
+            self.user_token = response["access_token"]
+            self.log_test_result("일반 사용자 로그인", True, "사용자 토큰 획득 성공")
+        else:
+            self.log_test_result("일반 사용자 로그인", False, f"Status: {status}, Response: {response}")
+        
+        return self.admin_token and self.user_token
     
-    # 6. DELETE /{user_id} - 사용자 삭제 테스트
-    def test_delete_user(self):
-        """사용자 삭제 엔드포인트 테스트"""
-        logger.info("🧪 사용자 삭제 테스트 시작...")
+    async def test_authentication_and_authorization(self):
+        """인증 및 권한 테스트"""
+        logger.info("🔐 인증 및 권한 테스트 시작")
         
-        # 삭제할 테스트 사용자가 있다면 사용, 없으면 존재하지 않는 ID 사용
-        test_user_id = self.created_users[0] if self.created_users else 99999
+        # 1. 무인증 요청 테스트
+        status, response = await self.make_request("GET", "/api/users/")
+        self.log_test_result(
+            "무인증 사용자 목록 조회", 
+            status == 401, 
+            f"예상: 401, 실제: {status}"
+        )
         
-        # 6-1. 일반 사용자 토큰으로 접근 시 권한 오류 (403)
-        try:
-            response = requests.delete(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}",
-                headers=self.get_headers(self.user_token)
-            )
-            
-            success = response.status_code == 403
-            self.log_test_result(
-                "사용자 삭제 - 일반 사용자 권한 거부",
-                success,
-                f"예상 상태코드 403, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("사용자 삭제 - 일반 사용자 권한 거부", False, f"요청 오류: {e}")
+        # 2. 일반 사용자의 관리자 기능 접근
+        status, response = await self.make_request("GET", "/api/users/", token=self.user_token)
+        self.log_test_result(
+            "일반 사용자 관리자 기능 접근", 
+            status == 403, 
+            f"예상: 403, 실제: {status}"
+        )
         
-        # 6-2. 관리자가 사용자 삭제
-        try:
-            response = requests.delete(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}",
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            success = response.status_code in [200, 404, 400]  # 성공, 없음, 또는 본인 삭제 시도
-            self.log_test_result(
-                "사용자 삭제 - 관리자 권한",
-                success,
-                f"상태코드: {response.status_code}",
-                response.json() if response.status_code == 200 else response.text
-            )
-        except Exception as e:
-            self.log_test_result("사용자 삭제 - 관리자 권한", False, f"요청 오류: {e}")
+        # 3. 관리자 권한 확인
+        status, response = await self.make_request("GET", "/api/users/", token=self.admin_token)
+        self.log_test_result(
+            "관리자 사용자 목록 조회", 
+            status == 200, 
+            f"예상: 200, 실제: {status}"
+        )
+        
+        # 4. 본인 정보 조회 (일반 사용자)
+        status, response = await self.make_request("GET", "/api/users/me", token=self.user_token)
+        self.log_test_result(
+            "본인 정보 조회", 
+            status == 200, 
+            f"예상: 200, 실제: {status}"
+        )
     
-    # 7. POST /{user_id}/change-password - 비밀번호 변경 테스트
-    def test_change_password(self):
-        """비밀번호 변경 엔드포인트 테스트"""
-        logger.info("🧪 비밀번호 변경 테스트 시작...")
+    async def test_user_crud_operations(self):
+        """사용자 CRUD 작업 테스트"""
+        logger.info("📝 사용자 CRUD 작업 테스트 시작")
         
-        test_user_id = 1
+        # 1. 사용자 생성 테스트
+        new_user_data = {
+            "email": "newuser@test.com",
+            "username": "newuser",
+            "password": "newpass123",
+            "full_name": "새로운 사용자"
+        }
+        
+        status, response = await self.make_request("POST", "/api/users/", token=self.admin_token, data=new_user_data)
+        new_user_id = None
+        if status == 201:
+            new_user_id = response.get("id")
+            self.log_test_result("새 사용자 생성", True, f"사용자 ID: {new_user_id}")
+        else:
+            self.log_test_result("새 사용자 생성", False, f"Status: {status}, Response: {response}")
+        
+        # 2. 중복 이메일 테스트
+        status, response = await self.make_request("POST", "/api/users/", token=self.admin_token, data=new_user_data)
+        self.log_test_result(
+            "중복 이메일 사용자 생성", 
+            status == 400, 
+            f"예상: 400, 실제: {status}"
+        )
+        
+        # 3. 사용자 정보 수정 테스트
+        if new_user_id:
+            update_data = {
+                "username": "updated_user",
+                "full_name": "수정된 사용자"
+            }
+            
+            status, response = await self.make_request("PUT", f"/api/users/{new_user_id}", token=self.admin_token, data=update_data)
+            self.log_test_result(
+                "사용자 정보 수정", 
+                status == 200, 
+                f"예상: 200, 실제: {status}"
+            )
+        
+        # 4. 특정 사용자 조회 테스트
+        if new_user_id:
+            status, response = await self.make_request("GET", f"/api/users/{new_user_id}", token=self.admin_token)
+            self.log_test_result(
+                "특정 사용자 조회", 
+                status == 200, 
+                f"예상: 200, 실제: {status}"
+            )
+        
+        # 5. 사용자 삭제 테스트
+        if new_user_id:
+            status, response = await self.make_request("DELETE", f"/api/users/{new_user_id}", token=self.admin_token)
+            self.log_test_result(
+                "사용자 삭제", 
+                status == 200, 
+                f"예상: 200, 실제: {status}"
+            )
+    
+    async def test_password_management(self):
+        """비밀번호 관리 테스트"""
+        logger.info("🔑 비밀번호 관리 테스트 시작")
+        
+        if not self.created_user_id:
+            self.log_test_result("비밀번호 테스트 스킵", False, "테스트 사용자 ID 없음")
+            return
+        
+        # 1. 비밀번호 변경 테스트
         password_data = {
-            "current_password": "oldpassword123",
-            "new_password": "newpassword123!@#"
+            "current_password": "testpass123",
+            "new_password": "newpass456"
         }
         
-        # 7-1. 일반 사용자가 다른 사용자 비밀번호 변경 시 권한 오류
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}/change-password",
-                json=password_data,
-                headers=self.get_headers(self.user_token)
-            )
-            
-            success = response.status_code in [403, 404]
-            self.log_test_result(
-                "비밀번호 변경 - 일반 사용자 권한 거부",
-                success,
-                f"상태코드: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("비밀번호 변경 - 일반 사용자 권한 거부", False, f"요청 오류: {e}")
+        status, response = await self.make_request(
+            "POST", 
+            f"/api/users/{self.created_user_id}/change-password", 
+            token=self.user_token, 
+            data=password_data
+        )
+        self.log_test_result(
+            "비밀번호 변경", 
+            status == 200, 
+            f"예상: 200, 실제: {status}"
+        )
         
-        # 7-2. 필수 필드 누락 시 오류
-        invalid_data = {"current_password": "test"}  # new_password 누락
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}/change-password",
-                json=invalid_data,
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            success = response.status_code == 400
-            self.log_test_result(
-                "비밀번호 변경 - 필수 필드 누락",
-                success,
-                f"예상 상태코드 400, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("비밀번호 변경 - 필수 필드 누락", False, f"요청 오류: {e}")
+        # 2. 잘못된 현재 비밀번호 테스트
+        wrong_password_data = {
+            "current_password": "wrongpass",
+            "new_password": "newpass789"
+        }
+        
+        status, response = await self.make_request(
+            "POST", 
+            f"/api/users/{self.created_user_id}/change-password", 
+            token=self.user_token, 
+            data=wrong_password_data
+        )
+        self.log_test_result(
+            "잘못된 현재 비밀번호", 
+            status == 400, 
+            f"예상: 400, 실제: {status}"
+        )
     
-    # 8. GET /stats/overview - 사용자 통계 조회 테스트
-    def test_user_stats(self):
-        """사용자 통계 조회 엔드포인트 테스트"""
-        logger.info("🧪 사용자 통계 조회 테스트 시작...")
+    async def test_user_status_management(self):
+        """사용자 상태 관리 테스트"""
+        logger.info("🔄 사용자 상태 관리 테스트 시작")
         
-        # 8-1. 관리자 토큰으로 통계 조회 (200)
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/stats/overview",
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            if response.status_code == 200:
-                stats_data = response.json()
-                self.log_test_result(
-                    "사용자 통계 조회 - 관리자 권한",
-                    True,
-                    "통계 조회 성공",
-                    stats_data
-                )
-            else:
-                self.log_test_result(
-                    "사용자 통계 조회 - 관리자 권한",
-                    False,
-                    f"예상 상태코드 200, 실제: {response.status_code}",
-                    response.text
-                )
-        except Exception as e:
-            self.log_test_result("사용자 통계 조회 - 관리자 권한", False, f"요청 오류: {e}")
+        if not self.created_user_id:
+            self.log_test_result("상태 관리 테스트 스킵", False, "테스트 사용자 ID 없음")
+            return
         
-        # 8-2. 일반 사용자 토큰으로 접근 시 권한 오류 (403)
-        try:
-            response = requests.get(
-                f"{self.base_url}{self.api_prefix}/stats/overview",
-                headers=self.get_headers(self.user_token)
+        # 1. 사용자 비활성화 테스트
+        status, response = await self.make_request(
+            "POST", 
+            f"/api/users/{self.created_user_id}/deactivate", 
+            token=self.admin_token
+        )
+        self.log_test_result(
+            "사용자 비활성화", 
+            status == 200, 
+            f"예상: 200, 실제: {status}"
+        )
+        
+        # 2. 사용자 활성화 테스트
+        status, response = await self.make_request(
+            "POST", 
+            f"/api/users/{self.created_user_id}/activate", 
+            token=self.admin_token
+        )
+        self.log_test_result(
+            "사용자 활성화", 
+            status == 200, 
+            f"예상: 200, 실제: {status}"
+        )
+        
+        # 3. 본인 비활성화 방지 테스트
+        # 관리자 사용자 ID 가져오기
+        status, response = await self.make_request("GET", "/api/users/me", token=self.admin_token)
+        if status == 200:
+            admin_user_id = response.get("id")
+            status, response = await self.make_request(
+                "POST", 
+                f"/api/users/{admin_user_id}/deactivate", 
+                token=self.admin_token
             )
-            
-            success = response.status_code == 403
             self.log_test_result(
-                "사용자 통계 조회 - 일반 사용자 권한 거부",
-                success,
-                f"예상 상태코드 403, 실제: {response.status_code}",
-                response.text if not success else None
+                "본인 비활성화 방지", 
+                status == 400, 
+                f"예상: 400, 실제: {status}"
             )
-        except Exception as e:
-            self.log_test_result("사용자 통계 조회 - 일반 사용자 권한 거부", False, f"요청 오류: {e}")
     
-    # 9. POST /{user_id}/activate - 사용자 활성화 테스트
-    def test_activate_user(self):
-        """사용자 활성화 엔드포인트 테스트"""
-        logger.info("🧪 사용자 활성화 테스트 시작...")
+    async def test_user_statistics(self):
+        """사용자 통계 테스트"""
+        logger.info("📊 사용자 통계 테스트 시작")
         
-        test_user_id = 1
+        # 1. 관리자 통계 조회
+        status, response = await self.make_request("GET", "/api/users/stats/overview", token=self.admin_token)
+        self.log_test_result(
+            "사용자 통계 조회", 
+            status == 200, 
+            f"예상: 200, 실제: {status}",
+            response
+        )
         
-        # 9-1. 일반 사용자 토큰으로 접근 시 권한 오류 (403)
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}/activate",
-                headers=self.get_headers(self.user_token)
-            )
-            
-            success = response.status_code == 403
-            self.log_test_result(
-                "사용자 활성화 - 일반 사용자 권한 거부",
-                success,
-                f"예상 상태코드 403, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("사용자 활성화 - 일반 사용자 권한 거부", False, f"요청 오류: {e}")
-        
-        # 9-2. 관리자가 사용자 활성화
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}/activate",
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            success = response.status_code in [200, 404]
-            self.log_test_result(
-                "사용자 활성화 - 관리자 권한",
-                success,
-                f"상태코드: {response.status_code}",
-                response.json() if response.status_code == 200 else response.text
-            )
-        except Exception as e:
-            self.log_test_result("사용자 활성화 - 관리자 권한", False, f"요청 오류: {e}")
+        # 2. 일반 사용자 통계 접근 차단
+        status, response = await self.make_request("GET", "/api/users/stats/overview", token=self.user_token)
+        self.log_test_result(
+            "일반 사용자 통계 접근 차단", 
+            status == 403, 
+            f"예상: 403, 실제: {status}"
+        )
     
-    # 10. POST /{user_id}/deactivate - 사용자 비활성화 테스트
-    def test_deactivate_user(self):
-        """사용자 비활성화 엔드포인트 테스트"""
-        logger.info("🧪 사용자 비활성화 테스트 시작...")
+    async def test_pagination_and_filtering(self):
+        """페이지네이션 및 필터링 테스트"""
+        logger.info("📄 페이지네이션 및 필터링 테스트 시작")
         
-        test_user_id = 1
+        # 1. 기본 페이지네이션
+        params = {"page": 1, "limit": 10}
+        status, response = await self.make_request("GET", "/api/users/", token=self.admin_token, params=params)
+        self.log_test_result(
+            "기본 페이지네이션", 
+            status == 200, 
+            f"예상: 200, 실제: {status}"
+        )
         
-        # 10-1. 일반 사용자 토큰으로 접근 시 권한 오류 (403)
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}/deactivate",
-                headers=self.get_headers(self.user_token)
-            )
-            
-            success = response.status_code == 403
-            self.log_test_result(
-                "사용자 비활성화 - 일반 사용자 권한 거부",
-                success,
-                f"예상 상태코드 403, 실제: {response.status_code}",
-                response.text if not success else None
-            )
-        except Exception as e:
-            self.log_test_result("사용자 비활성화 - 일반 사용자 권한 거부", False, f"요청 오류: {e}")
+        # 2. 검색 기능
+        params = {"search": "test"}
+        status, response = await self.make_request("GET", "/api/users/", token=self.admin_token, params=params)
+        self.log_test_result(
+            "사용자 검색", 
+            status == 200, 
+            f"예상: 200, 실제: {status}"
+        )
         
-        # 10-2. 관리자가 사용자 비활성화
-        try:
-            response = requests.post(
-                f"{self.base_url}{self.api_prefix}/{test_user_id}/deactivate",
-                headers=self.get_headers(self.admin_token)
-            )
-            
-            success = response.status_code in [200, 404, 400]  # 성공, 없음, 또는 본인 비활성화 시도
-            self.log_test_result(
-                "사용자 비활성화 - 관리자 권한",
-                success,
-                f"상태코드: {response.status_code}",
-                response.json() if response.status_code == 200 else response.text
-            )
-        except Exception as e:
-            self.log_test_result("사용자 비활성화 - 관리자 권한", False, f"요청 오류: {e}")
+        # 3. 활성 상태 필터
+        params = {"is_active": True}
+        status, response = await self.make_request("GET", "/api/users/", token=self.admin_token, params=params)
+        self.log_test_result(
+            "활성 사용자 필터", 
+            status == 200, 
+            f"예상: 200, 실제: {status}"
+        )
     
-    def run_all_tests(self):
+    async def test_data_validation(self):
+        """데이터 검증 테스트"""
+        logger.info("🔍 데이터 검증 테스트 시작")
+        
+        # 1. 잘못된 이메일 형식
+        invalid_user_data = {
+            "email": "invalid-email",
+            "username": "testuser2",
+            "password": "testpass123"
+        }
+        
+        status, response = await self.make_request("POST", "/api/users/", token=self.admin_token, data=invalid_user_data)
+        self.log_test_result(
+            "잘못된 이메일 형식", 
+            status == 422, 
+            f"예상: 422, 실제: {status}"
+        )
+        
+        # 2. 필수 필드 누락
+        incomplete_user_data = {
+            "email": "incomplete@test.com"
+        }
+        
+        status, response = await self.make_request("POST", "/api/users/", token=self.admin_token, data=incomplete_user_data)
+        self.log_test_result(
+            "필수 필드 누락", 
+            status == 422, 
+            f"예상: 422, 실제: {status}"
+        )
+        
+        # 3. 존재하지 않는 사용자 조회
+        status, response = await self.make_request("GET", "/api/users/99999", token=self.admin_token)
+        self.log_test_result(
+            "존재하지 않는 사용자 조회", 
+            status == 404, 
+            f"예상: 404, 실제: {status}"
+        )
+    
+    async def run_all_tests(self):
         """모든 테스트 실행"""
-        logger.info("🚀 User Router 포괄적 테스트 시작...")
+        logger.info("🚀 User Router 종합 테스트 시작")
         
-        # 토큰 설정
-        self.setup_tokens()
+        # 테스트 환경 설정
+        if not await self.setup_test_environment():
+            logger.error("❌ 테스트 환경 설정 실패")
+            return
         
         # 모든 테스트 실행
-        test_methods = [
-            self.test_create_user,
-            self.test_get_users,
-            self.test_get_current_user,
-            self.test_get_user_by_id,
-            self.test_update_user,
-            self.test_delete_user,
-            self.test_change_password,
-            self.test_user_stats,
-            self.test_activate_user,
-            self.test_deactivate_user
-        ]
-        
-        for test_method in test_methods:
-            try:
-                test_method()
-                time.sleep(0.5)  # 테스트 간 간격
-            except Exception as e:
-                logger.error(f"❌ 테스트 실행 오류 {test_method.__name__}: {e}")
+        await self.test_authentication_and_authorization()
+        await self.test_user_crud_operations()
+        await self.test_password_management()
+        await self.test_user_status_management()
+        await self.test_user_statistics()
+        await self.test_pagination_and_filtering()
+        await self.test_data_validation()
         
         # 결과 요약
-        self.print_summary()
-        self.save_results()
+        self.print_test_summary()
+        
+        # 결과 파일 저장
+        await self.save_test_results()
     
-    def print_summary(self):
+    def print_test_summary(self):
         """테스트 결과 요약 출력"""
         total_tests = len(self.test_results)
         passed_tests = sum(1 for result in self.test_results if result["success"])
         failed_tests = total_tests - passed_tests
         
-        logger.info("=" * 80)
+        logger.info("=" * 60)
         logger.info("📊 테스트 결과 요약")
-        logger.info("=" * 80)
+        logger.info("=" * 60)
         logger.info(f"총 테스트: {total_tests}")
-        logger.info(f"✅ 성공: {passed_tests}")
-        logger.info(f"❌ 실패: {failed_tests}")
+        logger.info(f"성공: {passed_tests} ✅")
+        logger.info(f"실패: {failed_tests} ❌")
         logger.info(f"성공률: {(passed_tests/total_tests*100):.1f}%")
-        logger.info("=" * 80)
         
         if failed_tests > 0:
-            logger.info("❌ 실패한 테스트:")
+            logger.info("\n❌ 실패한 테스트:")
             for result in self.test_results:
                 if not result["success"]:
                     logger.info(f"  - {result['test_name']}: {result['details']}")
     
-    def save_results(self):
+    async def save_test_results(self):
         """테스트 결과를 JSON 파일로 저장"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"user_router_test_results_{timestamp}.json"
         
-        summary = {
-            "test_summary": {
-                "total_tests": len(self.test_results),
-                "passed_tests": sum(1 for r in self.test_results if r["success"]),
-                "failed_tests": sum(1 for r in self.test_results if not r["success"]),
-                "success_rate": f"{(sum(1 for r in self.test_results if r['success'])/len(self.test_results)*100):.1f}%"
-            },
-            "test_results": self.test_results,
-            "test_timestamp": datetime.now().isoformat()
-        }
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(self.test_results, f, ensure_ascii=False, indent=2)
         
-        try:
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(summary, f, ensure_ascii=False, indent=2)
-            logger.info(f"📄 테스트 결과가 {filename}에 저장되었습니다.")
-        except Exception as e:
-            logger.error(f"❌ 결과 저장 오류: {e}")
+        logger.info(f"📄 테스트 결과가 {filename}에 저장되었습니다.")
 
-def main():
+async def main():
     """메인 실행 함수"""
-    print("🧪 User Router 포괄적 테스트 스크립트")
-    print("=" * 60)
-    
-    # 서버 연결 확인
-    try:
-        response = requests.get("http://127.0.0.1:8000/")
-        if response.status_code == 200:
-            print("✅ 서버 연결 확인됨")
-        else:
-            print(f"⚠️ 서버 응답 이상: {response.status_code}")
-    except Exception as e:
-        print(f"❌ 서버 연결 실패: {e}")
-        print("서버가 실행 중인지 확인해주세요.")
-        return
-    
-    # 테스트 실행
-    tester = UserRouterComprehensiveTester()
-    tester.run_all_tests()
+    async with UserRouterTester() as tester:
+        await tester.run_all_tests()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
