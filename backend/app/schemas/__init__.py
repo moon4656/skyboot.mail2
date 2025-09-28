@@ -1,6 +1,6 @@
 # Schemas package
 
-from .base_schema import (
+from .user_schema import (
     UserBase,
     UserCreate,
     UserResponse,

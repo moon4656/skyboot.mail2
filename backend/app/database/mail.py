@@ -79,34 +79,34 @@ def drop_tables():
         logger.error(f"❌ 테이블 삭제 중 오류 발생: {e}")
         raise
 
-def init_default_folders(db: Session, user_id: int):
+def init_default_folders(db, user_uuid: str):
     """
-    사용자의 기본 폴더를 생성합니다.
+    사용자의 기본 폴더들을 생성합니다.
     
     Args:
         db: 데이터베이스 세션
-        user_id: 사용자 ID
+        user_uuid: 사용자 UUID
     """
-    from ..model.mail_model import MailFolder
+    from ..model.mail_model import MailFolder, FolderType
     
     default_folders = [
-        {"name": "받은편지함", "folder_type": "inbox", "is_system": True},
-        {"name": "보낸편지함", "folder_type": "sent", "is_system": True},
-        {"name": "임시보관함", "folder_type": "draft", "is_system": True},
-        {"name": "휴지통", "folder_type": "trash", "is_system": True},
+        {"name": "받은편지함", "folder_type": FolderType.INBOX.value, "is_system": True},
+        {"name": "보낸편지함", "folder_type": FolderType.SENT.value, "is_system": True},
+        {"name": "임시보관함", "folder_type": FolderType.DRAFT.value, "is_system": True},
+        {"name": "휴지통", "folder_type": FolderType.TRASH.value, "is_system": True},
     ]
     
     try:
         for folder_data in default_folders:
             # 이미 존재하는지 확인
             existing_folder = db.query(MailFolder).filter(
-                MailFolder.user_id == user_id,
+                MailFolder.user_uuid == user_uuid,
                 MailFolder.folder_type == folder_data["folder_type"]
             ).first()
             
             if not existing_folder:
                 folder = MailFolder(
-                    user_id=user_id,
+                    user_uuid=user_uuid,
                     name=folder_data["name"],
                     folder_type=folder_data["folder_type"],
                     is_system=folder_data["is_system"]
@@ -114,7 +114,7 @@ def init_default_folders(db: Session, user_id: int):
                 db.add(folder)
         
         db.commit()
-        logger.info(f"✅ 사용자 {user_id}의 기본 폴더가 생성되었습니다.")
+        logger.info(f"✅ 사용자 {user_uuid}의 기본 폴더가 생성되었습니다.")
         
     except Exception as e:
         db.rollback()

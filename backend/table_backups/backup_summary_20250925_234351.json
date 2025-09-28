@@ -1,0 +1,21 @@
+{
+  "backup_time": "20250925_234351",
+  "total_tables": 13,
+  "total_records": 158,
+  "backup_file": "table_backups/table_backup_20250925_234351.json",
+  "tables": {
+    "login_logs": 0,
+    "mail_attachments": 0,
+    "mail_folders": 12,
+    "mail_in_folders": 0,
+    "mail_logs": 0,
+    "mail_recipients": 40,
+    "mail_users": 14,
+    "mails": 20,
+    "organization_settings": 0,
+    "organization_usage": 0,
+    "organizations": 1,
+    "refresh_tokens": 62,
+    "users": 9
+  }
+}

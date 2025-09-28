@@ -1,11 +1,11 @@
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
-from ..database.base import get_db
+from ..database.user import get_db
 from ..model.user_model import User, RefreshToken, LoginLog
 from ..schemas import UserCreate, UserResponse, UserLogin, Token, TokenRefresh, AccessToken, MessageResponse, LoginLogCreate
 from ..service.auth_service import AuthService, get_current_user
-from ..middleware.tenant import get_current_org_id, get_current_organization
+from ..middleware.tenant_middleware import get_current_org_id, get_current_organization
 from ..config import settings
 import logging
 import uuid
@@ -34,9 +34,17 @@ async def register(
         from app.model.organization_model import Organization
         default_org = db.query(Organization).first()
         if default_org:
+            # 새로운 조직 모델에서는 org_id 컬럼을 사용
             org_id = default_org.org_id
         else:
-            raise HTTPException(status_code=500, detail="No organization found")
+            raise HTTPException(
+                status_code=404, 
+                detail={
+                    "error": "ORGANIZATION_NOT_FOUND",
+                    "message": "조직을 찾을 수 없습니다.",
+                    "path": "/auth/register"
+                }
+            )
     
     logger.info(f"📝 사용자 등록 시작 - 조직: {org_id}, 이메일: {user_data.email}")
     
@@ -65,8 +73,10 @@ async def register(
         
         # 새 사용자 생성
         hashed_password = AuthService.get_password_hash(user_data.password)
+        user_uuid = str(uuid.uuid4())
         new_user = User(
-            user_id=user_data.user_id,
+            user_id=str(uuid.uuid4()),  # UUID로 ID 생성
+            user_uuid=user_uuid,
             org_id=org_id,
             email=user_data.email,
             username=user_data.username,
@@ -80,8 +90,33 @@ async def register(
         db.commit()
         db.refresh(new_user)
         
-        logger.info(f"✅ 사용자 등록 완료 - 조직: {org_id}, 사용자: {new_user.user_id}")
-        return new_user
+        # 메일 사용자도 함께 생성
+        from app.model.mail_model import MailUser
+        mail_user = MailUser(
+            user_id=new_user.user_id,
+            user_uuid=new_user.user_uuid,
+            org_id=new_user.org_id,
+            email=new_user.email,
+            password_hash=new_user.hashed_password,
+            is_active=True
+        )
+        db.add(mail_user)
+        db.commit()
+        
+        logger.info(f"✅ 사용자 등록 완료 - 조직: {org_id}, 사용자: {new_user.user_id}, 메일 사용자 생성 완료")
+        
+        return UserResponse(
+            id=new_user.user_id,
+            user_id=new_user.user_id,
+            user_uuid=new_user.user_uuid,
+            email=new_user.email,
+            username=new_user.username,
+            org_id=new_user.org_id,
+            role=new_user.role,
+            is_active=new_user.is_active,
+            created_at=new_user.created_at,
+            updated_at=new_user.updated_at
+        )
         
     except HTTPException:
         raise
@@ -103,22 +138,17 @@ async def login(
     로그인 엔드포인트
     조직 내에서 사용자 인증을 수행합니다.
     """
-    # 조직 ID를 선택적으로 가져오기 (없으면 기본 조직 사용)
-    try:
-        org_id = getattr(request.state, 'org_id', 'default')
-    except AttributeError:
-        org_id = 'default'
-    
-    logger.info(f"🔐 로그인 시도 - 조직: {org_id}, 이메일: {user_credentials.email}")
+    logger.info(f"🔐 로그인 시도 - 이메일: {user_credentials.email}")
     
     # 클라이언트 정보 추출
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent", None)
     
     try:
-        # 조직 내에서 사용자 인증
-        user = AuthService.authenticate_user(
-            db, org_id, user_credentials.email, user_credentials.password
+        # 사용자 인증 (조직 ID 없이)
+        auth_service = AuthService(db)
+        user = auth_service.authenticate_user(
+            user_credentials.email, user_credentials.password
         )
         if not user:
             # 로그인 실패 로그 기록
@@ -139,26 +169,8 @@ async def login(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
-        # 토큰 생성
-        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-        
-        access_token = AuthService.create_access_token(
-            data={"sub": user.user_uuid, "org_id": org_id}, 
-            expires_delta=access_token_expires
-        )
-        refresh_token = AuthService.create_refresh_token(
-            data={"sub": user.user_uuid, "org_id": org_id}, 
-            expires_delta=refresh_token_expires
-        )
-        
-        # 리프레시 토큰 저장
-        refresh_token_obj = RefreshToken(
-            user_id=user.user_id,
-            token=refresh_token,
-            expires_at=datetime.utcnow() + refresh_token_expires
-        )
-        db.add(refresh_token_obj)
+        # 토큰 생성 (create_tokens 메서드에서 리프레시 토큰 저장까지 처리됨)
+        tokens = auth_service.create_tokens(user)
         
         # 사용자 마지막 로그인 시간 업데이트
         user.last_login_at = datetime.utcnow()
@@ -175,11 +187,11 @@ async def login(
         db.add(login_log)
         db.commit()
         
-        logger.info(f"✅ 로그인 성공 - 조직: {org_id}, 사용자: {user.user_id}")
+        logger.info(f"✅ 로그인 성공 - 사용자: {user.user_id}, 조직: {user.org_id}")
         
         return {
-            "access_token": access_token,
-            "refresh_token": refresh_token,
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens["refresh_token"],
             "token_type": "bearer",
             "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         }
@@ -189,7 +201,7 @@ async def login(
         raise
     except Exception as e:
         # 기타 예외 발생 시 로그 기록
-        logger.error(f"❌ 로그인 시스템 오류 - 조직: {org_id}, 이메일: {user_credentials.email}, 오류: {str(e)}")
+        logger.error(f"❌ 로그인 시스템 오류 - 이메일: {user_credentials.email}, 오류: {str(e)}")
         login_log = LoginLog(
             user_uuid=None,
             email=user_credentials.email,
@@ -215,10 +227,8 @@ async def refresh_token(token_data: TokenRefresh, db: Session = Depends(get_db))
     logger.info("🔄 토큰 재발급 요청")
     
     try:
-        auth_service = AuthService(db)
-        
         # 리프레시 토큰 검증
-        payload = auth_service.verify_token(token_data.refresh_token)
+        payload = AuthService.verify_token(token_data.refresh_token, "refresh")
         if payload is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -248,7 +258,7 @@ async def refresh_token(token_data: TokenRefresh, db: Session = Depends(get_db))
         # 데이터베이스에서 리프레시 토큰 확인
         stored_token = db.query(RefreshToken).filter(
             RefreshToken.token == token_data.refresh_token,
-            RefreshToken.user_id == user.user_id,
+            RefreshToken.user_uuid == user.user_uuid,
             RefreshToken.is_revoked == False,
             RefreshToken.expires_at > datetime.utcnow()
         ).first()
@@ -261,16 +271,17 @@ async def refresh_token(token_data: TokenRefresh, db: Session = Depends(get_db))
         
         # 새 액세스 토큰 생성
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        access_token = auth_service.create_access_token(
+        access_token = AuthService.create_access_token(
             data={"sub": user.user_uuid, "org_id": org_id}, 
             expires_delta=access_token_expires
         )
         
-        logger.info(f"✅ 토큰 재발급 완료 - 조직: {org_id}, 사용자: {user.user_id}")
+        logger.info(f"✅ 토큰 재발급 완료 - 조직: {org_id}, 사용자: {user.user_uuid}")
         
         return {
             "access_token": access_token,
-            "token_type": "bearer"
+            "token_type": "bearer",
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
         }
         
     except HTTPException:
@@ -291,14 +302,22 @@ async def get_current_user_info(
     """
     logger.info(f"👤 사용자 정보 조회 - 사용자: {current_user.user_id}")
     
+    # 디버깅: current_user 객체 상태 확인
+    logger.info(f"🔍 current_user 타입: {type(current_user)}")
+    logger.info(f"🔍 current_user 속성: user_id={getattr(current_user, 'user_id', 'MISSING')}, org_id={getattr(current_user, 'org_id', 'MISSING')}")
+    
+    # 딕셔너리로 변환해서 확인
+    if hasattr(current_user, '__dict__'):
+        logger.info(f"🔍 current_user.__dict__: {current_user.__dict__}")
+    
     return UserResponse(
         user_id=current_user.user_id,
         user_uuid=current_user.user_uuid,
         username=current_user.username,
         email=current_user.email,
-        full_name=current_user.full_name,
-        is_active=current_user.is_active,
         org_id=current_user.org_id,
+        role=current_user.role,
+        is_active=current_user.is_active,
         created_at=current_user.created_at,
         updated_at=current_user.updated_at
     )

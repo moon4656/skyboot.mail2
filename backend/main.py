@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import time
 import logging
@@ -14,14 +15,15 @@ from app.router.mail_advanced_router import router as mail_advanced_router
 from app.router.mail_setup_router import router as mail_setup_router
 from app.router.organization_router import router as organization_router
 from app.router.user_router import router as user_router
+from app.router.debug_router import router as debug_router
 
 # 데이터베이스 및 설정
-from app.database.base import engine, Base
+from app.database.user import engine, Base
 from app.config import settings
 from app.logging_config import setup_logging, get_logger
 
 # 미들웨어
-from app.middleware.tenant import TenantMiddleware
+from app.middleware.tenant_middleware import TenantMiddleware
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -93,44 +95,44 @@ app.add_middleware(
 )
 logger.info("🌐 CORS 미들웨어 설정 완료")
 
-# 테넌트(조직) 미들웨어 추가
+# 테넌트 미들웨어 추가
 app.add_middleware(TenantMiddleware)
 logger.info("🏢 테넌트 미들웨어 설정 완료")
 
-# 속도 제한 미들웨어 추가 (함수형)
-from app.middleware.rate_limit_middleware import rate_limit_middleware
+# 속도 제한 미들웨어 추가 (함수형) - Redis 연결 문제로 임시 비활성화
+# from app.middleware.rate_limit_middleware import rate_limit_middleware
 
-@app.middleware("http")
-async def rate_limit_middleware_wrapper(request: Request, call_next):
-    return await rate_limit_middleware(request, call_next)
+# @app.middleware("http")
+# async def rate_limit_middleware_wrapper(request: Request, call_next):
+#     return await rate_limit_middleware(request, call_next)
 
-logger.info("🚦 속도 제한 미들웨어 활성화 완료")
+logger.info("🚦 속도 제한 미들웨어 임시 비활성화 (Redis 연결 문제)")
 
-# 요청 로깅 미들웨어
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """요청 로깅 미들웨어"""
-    start_time = time.time()
-    
-    # 요청 정보 로깅
-    logger.info(f"📥 {request.method} {request.url.path} - IP: {request.client.host}")
-    
-    try:
-        response = await call_next(request)
-        process_time = time.time() - start_time
-        
-        # 응답 정보 로깅
-        logger.info(f"📤 {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.3f}s")
-        
-        # 응답 헤더에 처리 시간 추가
-        response.headers["X-Process-Time"] = str(process_time)
-        
-        return response
-        
-    except Exception as e:
-        process_time = time.time() - start_time
-        logger.error(f"❌ {request.method} {request.url.path} - Error: {str(e)} - Time: {process_time:.3f}s")
-        raise
+# 요청 로깅 미들웨어 (성능 테스트를 위해 임시 비활성화)
+# @app.middleware("http")
+# async def log_requests(request: Request, call_next):
+#     """요청 로깅 미들웨어"""
+#     start_time = time.time()
+#     
+#     # 요청 정보 로깅
+#     logger.info(f"📥 {request.method} {request.url.path} - IP: {request.client.host}")
+#     
+#     try:
+#         response = await call_next(request)
+#         process_time = time.time() - start_time
+#         
+#         # 응답 정보 로깅
+#         logger.info(f"📤 {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.3f}s")
+#         
+#         # 응답 헤더에 처리 시간 추가
+#         response.headers["X-Process-Time"] = str(process_time)
+#         
+#         return response
+#         
+#     except Exception as e:
+#         process_time = time.time() - start_time
+#         logger.error(f"❌ {request.method} {request.url.path} - Error: {str(e)} - Time: {process_time:.3f}s")
+#         raise
 
 # 전역 예외 처리기
 @app.exception_handler(HTTPException)
@@ -143,6 +145,46 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             "success": False,
             "message": exc.detail,
             "error_code": exc.status_code,
+            "timestamp": time.time()
+        }
+    )
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Pydantic 검증 에러 처리기"""
+    logger.error(f"❌ 검증 에러 발생: {exc.errors()}")
+    logger.error(f"📋 요청 URL: {request.url}")
+    logger.error(f"📋 요청 메서드: {request.method}")
+    
+    # 에러 메시지를 한국어로 변환하고 JSON 직렬화 가능하게 처리
+    error_messages = []
+    serializable_errors = []
+    
+    for error in exc.errors():
+        field = " -> ".join(str(loc) for loc in error["loc"])
+        msg = error["msg"]
+        error_messages.append(f"{field}: {msg}")
+        
+        # JSON 직렬화 가능한 에러 정보 생성
+        serializable_error = {
+            "type": error["type"],
+            "loc": error["loc"],
+            "msg": error["msg"],
+            "input": str(error.get("input", ""))  # input을 문자열로 변환
+        }
+        # ctx에 ValueError가 있으면 문자열로 변환
+        if "ctx" in error and "error" in error["ctx"]:
+            serializable_error["ctx"] = {"error": str(error["ctx"]["error"])}
+        
+        serializable_errors.append(serializable_error)
+    
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "message": "입력 데이터 검증 오류",
+            "errors": error_messages,
+            "detail": serializable_errors,
             "timestamp": time.time()
         }
     )
@@ -171,6 +213,12 @@ app.include_router(mail_core_router, prefix=f"{api_prefix}/mail", tags=["메일 
 app.include_router(mail_convenience_router, prefix=f"{api_prefix}/mail", tags=["메일 편의"]) 
 app.include_router(mail_advanced_router, prefix=f"{api_prefix}/mail", tags=["메일 고급"]) 
 app.include_router(mail_setup_router, prefix=f"{api_prefix}/mail", tags=["메일 설정"]) 
+
+# 개발 환경에서만 디버그 라우터 추가
+if settings.is_development():
+    app.include_router(debug_router, prefix=f"{api_prefix}", tags=["디버그"])
+    logger.info("🔍 디버그 라우터 등록 완료 (개발 환경)")
+
 logger.info("📡 API 라우터 등록 완료")
 
 @app.get("/", summary="API 루트", description="SkyBoot Mail SaaS API 기본 정보")
@@ -200,11 +248,31 @@ async def root():
 
 @app.get("/health", summary="헬스체크", description="시스템 상태 및 의존성 확인")
 async def health_check():
-    """헬스체크 엔드포인트 - 시스템 상태 및 의존성 확인"""
+    """헬스체크 엔드포인트 - 시스템 상태 및 의존성 확인 (최적화됨)"""
+    from datetime import datetime, timezone
+    
+    # 로깅 제거로 성능 향상
+    # logger.info("💚 헬스체크 엔드포인트 접근")
+    
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "environment": settings.ENVIRONMENT,
+        "version": settings.APP_VERSION
+    }
+    
+    # 간단한 헬스체크 - 데이터베이스 연결 확인 제거 (성능 최적화)
+    # 필요시 별도의 /health/detailed 엔드포인트에서 상세 확인 수행
+    
+    return health_status
+
+@app.get("/health/detailed", summary="상세 헬스체크", description="데이터베이스 연결 등 상세 시스템 상태 확인")
+async def detailed_health_check():
+    """상세 헬스체크 엔드포인트 - 데이터베이스 연결 등 상세 확인"""
     from datetime import datetime, timezone
     from sqlalchemy import text
     
-    logger.info("💚 헬스체크 엔드포인트 접근")
+    logger.info("🔍 상세 헬스체크 엔드포인트 접근")
     
     health_status = {
         "status": "healthy",
@@ -227,6 +295,7 @@ async def health_check():
             "status": "unhealthy",
             "message": f"데이터베이스 연결 실패: {str(e)}"
         }
+        health_status["status"] = "unhealthy"
 
     return health_status
 

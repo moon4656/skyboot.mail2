@@ -4,7 +4,7 @@ SaaS 미들웨어 패키지
 다중 조직 지원을 위한 미들웨어 모음
 """
 
-from .tenant import (
+from .tenant_middleware import (
     TenantMiddleware, 
     get_current_org, 
     get_current_user, 

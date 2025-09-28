@@ -15,10 +15,10 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from passlib.context import CryptContext
 
 from ..model import User, RefreshToken, Organization
-from ..schemas.base_schema import UserCreate, UserLogin, Token
+from ..schemas.user_schema import UserCreate, UserLogin, Token
 from ..config import settings
-from ..database.base import get_db
-from ..middleware.tenant import get_current_org_id
+from ..database.user import get_db
+from ..middleware.tenant_middleware import get_current_org_id
 
 # 로거 설정
 logger = logging.getLogger(__name__)
@@ -42,6 +42,15 @@ class AuthService:
     SaaS 다중 조직 지원을 위한 사용자 인증, 토큰 관리, 비밀번호 해싱 등의 기능을 제공합니다.
     """
     
+    def __init__(self, db: Session):
+        """
+        AuthService 초기화
+        
+        Args:
+            db: 데이터베이스 세션
+        """
+        self.db = db
+    
     @staticmethod
     def verify_password(plain_password: str, hashed_password: str) -> bool:
         """비밀번호 검증"""
@@ -55,6 +64,7 @@ class AuthService:
     @staticmethod
     def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
         """액세스 토큰 생성"""
+        import uuid
         to_encode = data.copy()
         
         if expires_delta:
@@ -62,7 +72,11 @@ class AuthService:
         else:
             expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         
-        to_encode.update({"exp": expire, "type": "access"})
+        to_encode.update({
+            "exp": expire, 
+            "type": "access",
+            "jti": str(uuid.uuid4())  # JWT ID로 고유성 보장
+        })
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         
         return encoded_jwt
@@ -70,6 +84,7 @@ class AuthService:
     @staticmethod
     def create_refresh_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
         """리프레시 토큰 생성"""
+        import uuid
         to_encode = data.copy()
         
         if expires_delta:
@@ -77,63 +92,27 @@ class AuthService:
         else:
             expire = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
         
-        to_encode.update({"exp": expire, "type": "refresh"})
+        to_encode.update({
+            "exp": expire, 
+            "type": "refresh",
+            "jti": str(uuid.uuid4())  # JWT ID로 고유성 보장
+        })
         encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
         
         return encoded_jwt
     
     @staticmethod
-    def verify_token(token: str) -> Optional[Dict[str, Any]]:
+    def verify_token(token: str, token_type: str = "access") -> Optional[Dict[str, Any]]:
         """토큰 검증"""
         try:
             payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            if payload.get("type") != token_type:
+                return None
             return payload
         except JWTError:
             return None
     
-    @staticmethod
-    def authenticate_user(db: Session, org_id: str, email: str, password: str):
-        """
-        사용자 인증 - 조직별 격리
-        
-        Args:
-            db: 데이터베이스 세션
-            org_id: 조직 ID
-            email: 이메일
-            password: 비밀번호
-        
-        Returns:
-            인증된 사용자 또는 None
-        """
-        logger.info(f"🔐 사용자 인증 시도 - org_id: {org_id}, email: {email}")
-        
-        try:
-            # 조직 내에서 사용자 조회
-            user = db.query(User).filter(
-                User.org_id == org_id,
-                User.email == email,
-                User.is_active == True
-            ).first()
-            
-            if not user:
-                logger.warning(f"❌ 사용자를 찾을 수 없음 - org_id: {org_id}, email: {email}")
-                return None
-            
-            # 비밀번호 검증
-            if not AuthService.verify_password(password, user.hashed_password):
-                logger.warning(f"❌ 비밀번호 불일치 - user_id: {user.user_id}")
-                return None
-            
-            # 마지막 로그인 시간 업데이트
-            user.last_login_at = datetime.utcnow()
-            db.commit()
-            
-            logger.info(f"✅ 사용자 인증 성공 - user_id: {user.user_id}")
-            return user
-            
-        except Exception as e:
-            logger.error(f"❌ 사용자 인증 오류: {str(e)}")
-            return None
+
     
     @staticmethod
     def get_user_by_token(db: Session, org_id: str, user_uuid: str):
@@ -268,53 +247,60 @@ class AuthService:
             토큰 정보 딕셔너리
         """
         try:
-            logger.info(f"🎫 토큰 생성 - 사용자 ID: {user.id}, 조직 ID: {user.org_id}")
+            logger.info(f"🎫 토큰 생성 - 사용자 UUID: {user.user_uuid}, 조직 ID: {user.org_id}")
+            
+            # 최신 사용자 정보 다시 조회 (역할 업데이트 반영)
+            fresh_user = self.db.query(User).filter(User.user_uuid == user.user_uuid).first()
+            if fresh_user:
+                user = fresh_user
+                logger.info(f"🔄 최신 사용자 정보 조회 완료 - 역할: {user.role}")
             
             # 조직 정보 조회
-            organization = self.db.query(Organization).filter(Organization.id == user.org_id).first()
+            organization = self.db.query(Organization).filter(Organization.org_id == user.org_id).first()
             
             # 액세스 토큰 데이터 (조직 정보 포함)
             access_token_data = {
-                "sub": str(user.id),
+                "sub": str(user.user_uuid),
                 "email": user.email,
                 "username": user.username,
-                "is_admin": user.is_admin,
+                "is_admin": user.role in ["admin", "system_admin"],
+                "role": user.role,
                 "org_id": user.org_id,
                 "org_name": organization.name if organization else None,
-                "org_domain": organization.domain if organization else None,
-                "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+                "org_domain": organization.domain if organization else None
             }
             
             # 리프레시 토큰 데이터
             refresh_token_data = {
-                "sub": str(user.id),
-                "org_id": user.org_id,
-                "type": "refresh",
-                "exp": datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+                "sub": str(user.user_uuid),
+                "org_id": user.org_id
             }
             
-            # 토큰 생성
-            access_token = jwt.encode(access_token_data, SECRET_KEY, algorithm=ALGORITHM)
-            refresh_token = jwt.encode(refresh_token_data, SECRET_KEY, algorithm=ALGORITHM)
+            logger.info(f"🔍 토큰 데이터 생성 - access_token_data: {access_token_data}")
+            logger.info(f"🔍 토큰 데이터 생성 - refresh_token_data: {refresh_token_data}")
+            
+            # 토큰 생성 (정적 메서드 사용)
+            access_token = AuthService.create_access_token(access_token_data)
+            refresh_token = AuthService.create_refresh_token(refresh_token_data)
             
             # 기존 리프레시 토큰 무효화
             self.db.query(RefreshToken).filter(
-                RefreshToken.user_id == user.id,
-                RefreshToken.is_active == True
-            ).update({"is_active": False})
+                RefreshToken.user_uuid == user.user_uuid,
+                RefreshToken.is_revoked == False
+            ).update({"is_revoked": True})
             
             # 새 리프레시 토큰 저장
             new_refresh_token = RefreshToken(
-                user_id=user.id,
+                user_uuid=user.user_uuid,
                 token=refresh_token,
                 expires_at=datetime.now(timezone.utc) + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
-                is_active=True,
+                is_revoked=False,
                 created_at=datetime.now(timezone.utc)
             )
             self.db.add(new_refresh_token)
             self.db.commit()
             
-            logger.info(f"✅ 토큰 생성 완료 - 사용자 ID: {user.id}, 조직 ID: {user.org_id}")
+            logger.info(f"✅ 토큰 생성 완료 - 사용자 UUID: {user.user_uuid}, 조직 ID: {user.org_id}")
             
             return {
                 "access_token": access_token,
@@ -322,10 +308,10 @@ class AuthService:
                 "token_type": "bearer",
                 "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
                 "user": {
-                    "id": user.id,
+                    "id": user.user_uuid,
                     "email": user.email,
                     "username": user.username,
-                    "is_admin": user.is_admin,
+                    "is_admin": user.role == "admin",
                     "org_id": user.org_id,
                     "org_name": organization.name if organization else None
                 }
@@ -338,6 +324,54 @@ class AuthService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="토큰 생성 중 오류가 발생했습니다."
             )
+    
+    def authenticate_user(self, email: str, password: str, org_id: Optional[str] = None):
+        """
+        사용자 인증을 수행합니다.
+        
+        Args:
+            email: 사용자 이메일
+            password: 비밀번호
+            org_id: 조직 ID (선택사항)
+            
+        Returns:
+            인증된 사용자 객체 또는 None
+        """
+        try:
+            logger.info(f"🔐 사용자 인증 시도 - 이메일: {email}, 조직 ID: {org_id}")
+            
+            # 사용자 조회 (조직 ID가 있으면 조직 내에서만 검색)
+            query = self.db.query(User).filter(User.email == email)
+            if org_id:
+                query = query.filter(User.org_id == org_id)
+            
+            user = query.first()
+            if not user:
+                logger.warning(f"❌ 사용자를 찾을 수 없음 - 이메일: {email}, 조직 ID: {org_id}")
+                return None
+            
+            # 조직 활성화 상태 확인
+            organization = self.db.query(Organization).filter(Organization.org_id == user.org_id).first()
+            if not organization or not organization.is_active:
+                logger.warning(f"❌ 조직이 비활성화됨 - 조직 ID: {user.org_id}")
+                return None
+            
+            # 비밀번호 검증
+            if not verify_password(password, user.hashed_password):
+                logger.warning(f"❌ 비밀번호 불일치 - 이메일: {email}")
+                return None
+            
+            # 사용자 활성화 상태 확인
+            if not user.is_active:
+                logger.warning(f"❌ 비활성화된 사용자 - 이메일: {email}")
+                return None
+            
+            logger.info(f"✅ 사용자 인증 성공 - 이메일: {email}, 조직 ID: {user.org_id}")
+            return user
+            
+        except Exception as e:
+            logger.error(f"❌ 사용자 인증 실패: {str(e)}")
+            return None
 
 def get_password_hash(password: str) -> str:
     """
@@ -364,53 +398,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     """
     return pwd_context.verify(plain_password, hashed_password)
 
-    def authenticate_user(self, email: str, password: str, org_id: Optional[int] = None):
-        """
-        사용자 인증을 수행합니다.
-        
-        Args:
-            email: 사용자 이메일
-            password: 비밀번호
-            org_id: 조직 ID (선택사항)
-            
-        Returns:
-            인증된 사용자 객체 또는 None
-        """
-        try:
-            logger.info(f"🔐 사용자 인증 시도 - 이메일: {email}, 조직 ID: {org_id}")
-            
-            # 사용자 조회 (조직 ID가 있으면 조직 내에서만 검색)
-            query = self.db.query(User).filter(User.email == email)
-            if org_id:
-                query = query.filter(User.org_id == org_id)
-            
-            user = query.first()
-            if not user:
-                logger.warning(f"❌ 사용자를 찾을 수 없음 - 이메일: {email}, 조직 ID: {org_id}")
-                return None
-            
-            # 조직 활성화 상태 확인
-            organization = self.db.query(Organization).filter(Organization.id == user.org_id).first()
-            if not organization or not organization.is_active:
-                logger.warning(f"❌ 조직이 비활성화됨 - 조직 ID: {user.org_id}")
-                return None
-            
-            # 비밀번호 검증
-            if not verify_password(password, user.password_hash):
-                logger.warning(f"❌ 비밀번호 불일치 - 이메일: {email}")
-                return None
-            
-            # 사용자 활성화 상태 확인
-            if not user.is_active:
-                logger.warning(f"❌ 비활성화된 사용자 - 이메일: {email}")
-                return None
-            
-            logger.info(f"✅ 사용자 인증 성공 - 이메일: {email}, 조직 ID: {user.org_id}")
-            return user
-            
-        except Exception as e:
-            logger.error(f"❌ 사용자 인증 실패: {str(e)}")
-            return None
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
@@ -446,7 +434,7 @@ def create_refresh_token(db: Session, user_id: str) -> str:
     """
     # 기존 리프레시 토큰 무효화
     db.query(RefreshToken).filter(
-        RefreshToken.user_id == user_id,
+        RefreshToken.user_uuid == user_id,
         RefreshToken.is_revoked == False
     ).update({"is_revoked": True})
     
@@ -463,7 +451,7 @@ def create_refresh_token(db: Session, user_id: str) -> str:
     
     # 데이터베이스에 리프레시 토큰 저장
     db_token = RefreshToken(
-        user_id=user_id,
+        user_uuid=user_id,
         token=refresh_token,
         expires_at=expire
     )
@@ -523,12 +511,12 @@ def get_current_user(
         if user_id is None or org_id is None:
             raise credentials_exception
             
-    except jwt.PyJWTError:
+    except JWTError:
         raise credentials_exception
     
     # 사용자 조회 (조직 컨텍스트 포함)
     user = db.query(User).filter(
-        User.id == int(user_id),
+        User.user_uuid == user_id,
         User.org_id == org_id
     ).first()
     
@@ -536,7 +524,7 @@ def get_current_user(
         raise credentials_exception
     
     # 조직 활성화 상태 확인
-    organization = db.query(Organization).filter(Organization.id == org_id).first()
+    organization = db.query(Organization).filter(Organization.org_id == org_id).first()
     if not organization or not organization.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -588,7 +576,7 @@ def check_permission(required_role: str = None):
             
             # 역할 확인
             if required_role:
-                if required_role == "admin" and not current_user.is_admin:
+                if required_role == "admin" and current_user.role not in ["admin", "system_admin"]:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail="관리자 권한이 필요합니다."
@@ -697,7 +685,7 @@ async def get_admin_user_with_org(
     Raises:
         HTTPException: 관리자가 아닌 경우
     """
-    if not current_user.is_admin:
+    if current_user.role not in ["admin", "system_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="관리자 권한이 필요합니다."
@@ -709,7 +697,7 @@ def get_current_admin_user(current_user: User = Depends(get_current_active_user)
     현재 관리자 사용자를 반환합니다.
     
     Args:
-        current_user: 현재 활성화된 사용자
+        current_user: 현재 사용자
         
     Returns:
         관리자 사용자 객체
@@ -717,7 +705,7 @@ def get_current_admin_user(current_user: User = Depends(get_current_active_user)
     Raises:
         HTTPException: 관리자가 아닌 경우
     """
-    if not current_user.is_admin:
+    if current_user.role not in ["admin", "system_admin"]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="관리자 권한이 필요합니다."

@@ -6,7 +6,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import logging
 
-from ..database.base import get_db
+from ..database.user import get_db
 from ..model.user_model import User
 from ..model.mail_model import Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog
 from ..schemas.mail_schema import (
@@ -14,7 +14,7 @@ from ..schemas.mail_schema import (
     RecipientType, MailStatus, MailPriority, FolderType
 )
 from ..service.auth_service import get_current_user
-from ..middleware.tenant import get_current_org_id
+from ..middleware.tenant_middleware import get_current_org_id
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +37,7 @@ async def search_mails(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -49,11 +49,11 @@ async def search_mails(
         query = db.query(Mail).filter(
             Mail.org_id == current_org_id,
             or_(
-                Mail.sender_uuid == mail_user.id,
+                Mail.sender_uuid == mail_user.user_uuid,
                 Mail.id.in_(
-                    db.query(MailRecipient.mail_id).filter(
-                        MailRecipient.recipient_id == mail_user.id
-                    )
+                db.query(MailRecipient.mail_uuid).filter(
+                    MailRecipient.recipient_uuid == mail_user.user_id
+                )
                 )
             )
         )
@@ -73,7 +73,7 @@ async def search_mails(
             sender_users = db.query(MailUser).filter(
                 MailUser.email.ilike(f"%{search_request.sender_email}%")
             ).all()
-            sender_uuids = [user.id for user in sender_users]
+            sender_uuids = [user.user_uuid for user in sender_users]
             if sender_uuids:
                 query = query.filter(Mail.sender_uuid.in_(sender_uuids))
             else:
@@ -82,12 +82,12 @@ async def search_mails(
         
         # 수신자 필터
         if search_request.recipient_email:
-            recipient_mail_ids = db.query(MailRecipient.mail_id).filter(
+            recipient_mail_ids = db.query(MailRecipient.mail_uuid).filter(
                 MailRecipient.email.ilike(f"%{search_request.recipient_email}%")
             ).all()
-            mail_ids = [mail_id[0] for mail_id in recipient_mail_ids]
-            if mail_ids:
-                query = query.filter(Mail.id.in_(mail_ids))
+            mail_uuids = [mail_uuid[0] for mail_uuid in recipient_mail_ids]
+            if mail_uuids:
+                query = query.filter(Mail.mail_uuid.in_(mail_uuids))
             else:
                 # 수신자가 없으면 빈 결과 반환
                 query = query.filter(False)
@@ -131,28 +131,28 @@ async def search_mails(
             # 발신자 정보
             sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
             sender_response = {
-                "id": sender.id if sender else 0,
+                "id": sender.user_uuid if sender else 0,
                 "email": sender.email if sender else "Unknown",
                 "display_name": sender.display_name if sender else "Unknown"
             }
             
             # 수신자 개수
-            recipient_count = db.query(MailRecipient).filter(MailRecipient.mail_id == mail.id).count()
+            recipient_count = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).count()
             
             # 첨부파일 개수
-            attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_id == mail.id).count()
+            attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).count()
             
             # 현재 사용자의 읽음 상태 확인
             current_recipient = db.query(MailRecipient).filter(
                 and_(
-                    MailRecipient.mail_id == mail.id,
-                    MailRecipient.recipient_id == mail_user.id
+                    MailRecipient.mail_uuid == mail.mail_uuid,
+                    MailRecipient.recipient_uuid == mail_user.user_uuid
                 )
             ).first()
             is_read = current_recipient.is_read if current_recipient else None
             
             mail_list.append({
-                "id": mail.id,
+                "id": mail.mail_uuid,
                 "mail_uuid": mail.mail_uuid,
                 "subject": mail.subject,
                 "status": mail.status,
@@ -198,7 +198,7 @@ async def get_mail_stats(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -210,7 +210,7 @@ async def get_mail_stats(
         sent_count = db.query(Mail).filter(
             and_(
                 Mail.org_id == current_org_id,
-                Mail.sender_uuid == mail_user.id,
+                Mail.sender_uuid == mail_user.user_uuid,
                 Mail.status == MailStatus.SENT
             )
         ).count()
@@ -227,24 +227,24 @@ async def get_mail_stats(
         unread_count = 0
         if inbox_folder:
             received_count = db.query(Mail).join(
-                MailInFolder, Mail.id == MailInFolder.mail_id
+                MailInFolder, Mail.mail_uuid == MailInFolder.mail_uuid
             ).filter(
                 and_(
                     Mail.org_id == current_org_id,
-                    MailInFolder.folder_id == inbox_folder.id
+                    MailInFolder.folder_uuid == inbox_folder.folder_uuid
                 )
             ).count()
             
             # 읽지 않은 메일 수
             unread_count = db.query(Mail).join(
-                MailInFolder, Mail.id == MailInFolder.mail_id
+                MailInFolder, Mail.mail_uuid == MailInFolder.mail_uuid
             ).join(
-                MailRecipient, Mail.id == MailRecipient.mail_id
+                MailRecipient, Mail.mail_uuid == MailRecipient.mail_uuid
             ).filter(
                 and_(
                     Mail.org_id == current_org_id,
-                    MailInFolder.folder_id == inbox_folder.id,
-                    MailRecipient.recipient_id == mail_user.id,
+                    MailInFolder.folder_uuid == inbox_folder.folder_uuid,
+                    MailRecipient.recipient_uuid == mail_user.user_uuid,
                     MailRecipient.is_read == False
                 )
             ).count()
@@ -253,7 +253,7 @@ async def get_mail_stats(
         draft_count = db.query(Mail).filter(
             and_(
                 Mail.org_id == current_org_id,
-                Mail.sender_uuid == mail_user.id,
+                Mail.sender_uuid == mail_user.user_uuid,
                 Mail.status == MailStatus.DRAFT
             )
         ).count()
@@ -269,11 +269,11 @@ async def get_mail_stats(
         trash_count = 0
         if trash_folder:
             trash_count = db.query(Mail).join(
-                MailInFolder, Mail.id == MailInFolder.mail_id
+                MailInFolder, Mail.mail_uuid == MailInFolder.mail_uuid
             ).filter(
                 and_(
                     Mail.org_id == current_org_id,
-                    MailInFolder.folder_id == trash_folder.id
+                    MailInFolder.folder_uuid == trash_folder.folder_uuid
                 )
             ).count()
         
@@ -281,7 +281,7 @@ async def get_mail_stats(
         today = datetime.now().date()
         today_sent = db.query(Mail).filter(
             and_(
-                Mail.sender_uuid == mail_user.id,
+                Mail.sender_uuid == mail_user.user_uuid,
                 Mail.status == MailStatus.SENT,
                 func.date(Mail.sent_at) == today
             )
@@ -290,10 +290,10 @@ async def get_mail_stats(
         today_received = 0
         if inbox_folder:
             today_received = db.query(Mail).join(
-                MailInFolder, Mail.id == MailInFolder.mail_id
+                MailInFolder, Mail.mail_uuid == MailInFolder.mail_uuid
             ).filter(
                 and_(
-                    MailInFolder.folder_id == inbox_folder.id,
+                    MailInFolder.folder_uuid == inbox_folder.folder_uuid,
                     func.date(Mail.created_at) == today
                 )
             ).count()
@@ -338,7 +338,7 @@ async def get_unread_mails(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -349,7 +349,7 @@ async def get_unread_mails(
         # 받은편지함 폴더 조회 (조직별 필터링 추가)
         inbox_folder = db.query(MailFolder).filter(
             and_(
-                MailFolder.user_uuid == mail_user.user_uuid,
+                MailFolder.user_id == mail_user.user_id,
                 MailFolder.folder_type == FolderType.INBOX
             )
         ).first()
@@ -369,14 +369,14 @@ async def get_unread_mails(
         
         # 읽지 않은 메일 쿼리 (조직별 필터링 추가)
         query = db.query(Mail).join(
-            MailInFolder, Mail.id == MailInFolder.mail_id
+            MailInFolder, Mail.mail_uuid == MailInFolder.mail_uuid
         ).join(
-            MailRecipient, Mail.id == MailRecipient.mail_id
+            MailRecipient, Mail.mail_uuid == MailRecipient.mail_uuid
         ).filter(
             and_(
                 Mail.org_id == current_org_id,
-                MailInFolder.folder_id == inbox_folder.id,
-                MailRecipient.recipient_id == mail_user.id,
+                MailInFolder.folder_uuid == inbox_folder.folder_uuid,
+                MailRecipient.recipient_uuid == mail_user.user_uuid,
                 MailRecipient.is_read == False
             )
         )
@@ -396,21 +396,21 @@ async def get_unread_mails(
             sender_email = sender.email if sender else "Unknown"
             
             # 수신자 정보
-            recipients = db.query(MailRecipient).filter(MailRecipient.mail_id == mail.id).all()
+            recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
             to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
             
             # 현재 사용자의 읽음 상태 확인
             user_recipient = db.query(MailRecipient).filter(
-                MailRecipient.mail_id == mail.id,
-                MailRecipient.recipient_id == mail_user.id
+                MailRecipient.mail_uuid == mail.mail_uuid,
+                MailRecipient.recipient_uuid == mail_user.user_id
             ).first()
             is_read = user_recipient.is_read if user_recipient else False
             
             # 첨부파일 개수
-            attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_id == mail.id).count()
+            attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).count()
             
             mail_list.append({
-                "id": mail.id,
+                "id": mail.mail_uuid,
                 "subject": mail.subject,
                 "sender_email": sender_email,
                 "to_emails": to_emails,
@@ -467,7 +467,7 @@ async def get_starred_mails(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -480,10 +480,10 @@ async def get_starred_mails(
             and_(
                 Mail.org_id == current_org_id,
                 or_(
-                    Mail.sender_uuid == mail_user.id,
-                    Mail.id.in_(
-                        db.query(MailRecipient.mail_id).filter(
-                            MailRecipient.recipient_id == mail_user.id
+                    Mail.sender_uuid == mail_user.user_uuid,
+                    Mail.mail_uuid.in_(
+                        db.query(MailRecipient.mail_uuid).filter(
+                            MailRecipient.recipient_uuid == mail_user.user_uuid
                         )
                     )
                 ),
@@ -506,21 +506,21 @@ async def get_starred_mails(
             sender_email = sender.email if sender else "Unknown"
             
             # 수신자 정보
-            recipients = db.query(MailRecipient).filter(MailRecipient.mail_id == mail.id).all()
+            recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
             to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
             
             # 현재 사용자의 읽음 상태 확인
             user_recipient = db.query(MailRecipient).filter(
-                MailRecipient.mail_id == mail.id,
-                MailRecipient.recipient_id == mail_user.id
+                MailRecipient.mail_uuid == mail.mail_uuid,
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             ).first()
             is_read = user_recipient.is_read if user_recipient else False
             
             # 첨부파일 개수
-            attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_id == mail.id).count()
+            attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).count()
             
             mail_list.append({
-                "id": mail.id,
+                "id": mail.mail_uuid, 
                 "subject": mail.subject,
                 "sender_email": sender_email,
                 "to_emails": to_emails,
@@ -563,20 +563,20 @@ async def get_starred_mails(
         )
 
 
-@router.post("/{mail_id}/read", response_model=APIResponse, summary="메일 읽음 처리")
+@router.post("/{mail_uuid}/read", response_model=APIResponse, summary="메일 읽음 처리")
 async def mark_mail_as_read(
-    mail_id: str,
+    mail_uuid: str,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id)
 ) -> APIResponse:
     """메일 읽음 처리"""
     try:
-        logger.info(f"📧 mark_mail_as_read 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        logger.info(f"📧 mark_mail_as_read 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -586,20 +586,20 @@ async def mark_mail_as_read(
         
         # 메일 조회 (조직별 필터링 추가)
         mail = db.query(Mail).filter(
-            Mail.id == mail_id,
+            Mail.mail_uuid == mail_uuid,
             Mail.org_id == current_org_id
         ).first()
         
         if not mail:
-            logger.warning(f"⚠️ 메일을 찾을 수 없음 - 조직: {current_org_id}, 메일ID: {mail_id}")
+            logger.warning(f"⚠️ 메일을 찾을 수 없음 - 조직: {current_org_id}, 메일UUID: {mail_uuid}")
             raise HTTPException(status_code=404, detail="조직 내에서 메일을 찾을 수 없습니다")
         
         # 권한 확인 (발신자이거나 수신자인지 확인)
-        is_sender = mail.sender_uuid == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.user_uuid
         is_recipient = db.query(MailRecipient).filter(
             and_(
-                MailRecipient.mail_id == mail.id,
-                MailRecipient.recipient_id == mail_user.id
+                MailRecipient.mail_uuid == mail.mail_uuid,
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first() is not None
         
@@ -609,8 +609,8 @@ async def mark_mail_as_read(
         # 수신자의 읽음 상태 확인 및 업데이트
         recipient = db.query(MailRecipient).filter(
             and_(
-                MailRecipient.mail_id == mail.id,
-                MailRecipient.recipient_id == mail_user.id
+                MailRecipient.mail_uuid == mail.mail_uuid,
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first()
         
@@ -621,8 +621,8 @@ async def mark_mail_as_read(
             
             # 로그 기록
             log_entry = MailLog(
-                mail_id=mail.id,
-                user_id=mail_user.id,
+                mail_uuid=mail.mail_uuid,
+                user_uuid=mail_user.user_uuid,
                 action="read",
                 status="success",
                 message=f"메일 읽음 처리: {mail.subject}"
@@ -636,13 +636,13 @@ async def mark_mail_as_read(
         else:
             read_at = None
         
-        logger.info(f"✅ mark_mail_as_read 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        logger.info(f"✅ mark_mail_as_read 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
         return APIResponse(
             success=True,
             message="메일이 읽음 처리되었습니다.",
             data={
-                "mail_id": mail.id,
+                "mail_uuid": mail.mail_uuid,
                 "read_at": read_at,
                 "is_read": recipient.is_read if recipient else False
             }
@@ -652,7 +652,7 @@ async def mark_mail_as_read(
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ mark_mail_as_read 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
+        logger.error(f"❌ mark_mail_as_read 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"메일 읽음 처리 중 오류가 발생했습니다: {str(e)}",
@@ -660,20 +660,20 @@ async def mark_mail_as_read(
         )
 
 
-@router.post("/{mail_id}/unread", response_model=APIResponse, summary="메일 읽지 않음 처리")
+@router.post("/{mail_uuid}/unread", response_model=APIResponse, summary="메일 읽지 않음 처리")
 async def mark_mail_as_unread(
-    mail_id: str,
+    mail_uuid: str,
     current_user: User = Depends(get_current_user),
     current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
 ) -> APIResponse:
     """메일 읽지 않음 처리"""
     try:
-        logger.info(f"📧 mark_mail_as_unread 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        logger.info(f"📧 mark_mail_as_unread 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
         # 메일 사용자 조회 (조직별 격리)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         if not mail_user:
@@ -682,18 +682,18 @@ async def mark_mail_as_unread(
         
         # 메일 조회 (조직별 격리)
         mail = db.query(Mail).filter(
-            Mail.id == mail_id,
+            Mail.mail_uuid == mail_uuid,
             Mail.org_id == current_org_id
         ).first()
         if not mail:
             raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
         
         # 권한 확인 (발신자이거나 수신자인지 확인)
-        is_sender = mail.sender_uuid == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.user_uuid
         is_recipient = db.query(MailRecipient).filter(
             and_(
-                MailRecipient.mail_id == mail.id,
-                MailRecipient.recipient_id == mail_user.id
+                MailRecipient.mail_uuid == mail.mail_uuid,
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first() is not None
         
@@ -706,28 +706,28 @@ async def mark_mail_as_unread(
         
         # 로그 기록
         log_entry = MailLog(
-            mail_id=mail.id,
-            user_id=current_user.id,
+            mail_uuid=mail.mail_uuid,
+            user_uuid=current_user.user_uuid,
             action="unread",
             timestamp=datetime.utcnow()
         )
         db.add(log_entry)
         db.commit()
         
-        logger.info(f"✅ mark_mail_as_unread 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        logger.info(f"✅ mark_mail_as_unread 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
         return APIResponse(
             success=True,
             message="메일이 읽지 않음 처리되었습니다.",
             data={
-                "mail_id": mail.id,
+                "mail_uuid": mail.mail_uuid,
                 "read_at": mail.read_at
             }
         )
         
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ mark_mail_as_unread 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
+        logger.error(f"❌ mark_mail_as_unread 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"메일 읽지 않음 처리 중 오류가 발생했습니다: {str(e)}",
@@ -748,7 +748,7 @@ async def mark_all_mails_as_read(
         
         # 메일 사용자 조회 (조직별 격리)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         if not mail_user:
@@ -760,7 +760,7 @@ async def mark_all_mails_as_read(
             # 받은편지함 폴더 조회
             folder = db.query(MailFolder).filter(
                 and_(
-                    MailFolder.user_id == mail_user.id,
+                    MailFolder.user_id == mail_user.user_id,
                     MailFolder.folder_type == FolderType.INBOX
                 )
             ).first()
@@ -768,10 +768,10 @@ async def mark_all_mails_as_read(
             if folder:
                 # 받은편지함의 읽지 않은 메일들 (조직별 격리)
                 mails = db.query(Mail).join(
-                    MailInFolder, Mail.id == MailInFolder.mail_id
+                    MailInFolder, Mail.mail_uuid == MailInFolder.mail_uuid
                 ).filter(
                     and_(
-                        MailInFolder.folder_id == folder.id,
+                        MailInFolder.folder_uuid == folder.folder_uuid,
                         Mail.read_at.is_(None),
                         Mail.org_id == current_org_id
                     )
@@ -781,7 +781,7 @@ async def mark_all_mails_as_read(
             # 보낸 메일함의 읽지 않은 메일들 (조직별 격리)
             mails = db.query(Mail).filter(
                 and_(
-                    Mail.sender_uuid == mail_user.id,
+                    Mail.sender_uuid == mail_user.user_uuid,
                     Mail.status == MailStatus.SENT,
                     Mail.read_at.is_(None),
                     Mail.org_id == current_org_id
@@ -805,8 +805,8 @@ async def mark_all_mails_as_read(
             
             # 로그 기록
             log_entry = MailLog(
-                mail_id=mail.id,
-                user_id=current_user.id,
+                mail_uuid=mail.mail_uuid,
+                user_uuid=current_user.user_uuid,
                 action="read",
                 timestamp=current_time
             )
@@ -835,20 +835,20 @@ async def mark_all_mails_as_read(
         )
 
 
-@router.post("/{mail_id}/star", response_model=APIResponse, summary="메일 중요 표시")
+@router.post("/{mail_uuid}/star", response_model=APIResponse, summary="메일 중요 표시")
 async def star_mail(
-    mail_id: str,
+    mail_uuid: str,
     current_user: User = Depends(get_current_user),
     current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
 ) -> APIResponse:
     """메일 중요 표시"""
     try:
-        logger.info(f"📧 star_mail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        logger.info(f"📧 star_mail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
         # 메일 사용자 조회 (조직별 격리)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         if not mail_user:
@@ -857,18 +857,18 @@ async def star_mail(
         
         # 메일 조회 (조직별 격리)
         mail = db.query(Mail).filter(
-            Mail.id == mail_id,
+            Mail.mail_uuid == mail_uuid,
             Mail.org_id == current_org_id
         ).first()
         if not mail:
             raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
         
         # 권한 확인 (발신자이거나 수신자인지 확인)
-        is_sender = mail.sender_uuid == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.user_uuid
         is_recipient = db.query(MailRecipient).filter(
             and_(
-                MailRecipient.mail_id == mail.id,
-                MailRecipient.recipient_id == mail_user.id
+                MailRecipient.mail_uuid == mail.mail_uuid,
+                MailRecipient.recipient_uuid == mail_user.user_id
             )
         ).first() is not None
         
@@ -881,28 +881,28 @@ async def star_mail(
         
         # 로그 기록
         log_entry = MailLog(
-            mail_id=mail.id,
-            user_id=current_user.id,
+            mail_uuid=mail.mail_uuid,
+            user_uuid=current_user.user_uuid,
             action="star",
             timestamp=datetime.utcnow()
         )
         db.add(log_entry)
         db.commit()
         
-        logger.info(f"✅ star_mail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        logger.info(f"✅ star_mail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
         return APIResponse(
             success=True,
             message="메일이 중요 표시되었습니다.",
             data={
-                "mail_id": mail.id,
+                "mail_uuid": mail.mail_uuid,
                 "priority": mail.priority
             }
         )
         
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ star_mail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
+        logger.error(f"❌ star_mail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"메일 중요 표시 중 오류가 발생했습니다: {str(e)}",
@@ -910,20 +910,20 @@ async def star_mail(
         )
 
 
-@router.delete("/{mail_id}/star", response_model=APIResponse, summary="메일 중요 표시 해제")
+@router.delete("/{mail_uuid}/star", response_model=APIResponse, summary="메일 중요 표시 해제")
 async def unstar_mail(
-    mail_id: str,
+    mail_uuid: str,
     current_user: User = Depends(get_current_user),
     current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
 ) -> APIResponse:
     """메일 중요 표시 해제"""
     try:
-        logger.info(f"📧 unstar_mail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        logger.info(f"📧 unstar_mail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
         # 메일 사용자 조회 (조직별 격리)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         if not mail_user:
@@ -932,18 +932,18 @@ async def unstar_mail(
         
         # 메일 조회 (조직별 격리)
         mail = db.query(Mail).filter(
-            Mail.id == mail_id,
+            Mail.mail_uuid == mail_uuid,
             Mail.org_id == current_org_id
         ).first()
         if not mail:
             raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다")
         
         # 권한 확인 (발신자이거나 수신자인지 확인)
-        is_sender = mail.sender_uuid == mail_user.id
+        is_sender = mail.sender_uuid == mail_user.user_uuid
         is_recipient = db.query(MailRecipient).filter(
             and_(
-                MailRecipient.mail_id == mail.id,
-                MailRecipient.email == mail_user.email
+                MailRecipient.mail_uuid == mail.mail_uuid,
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first() is not None
         
@@ -956,28 +956,28 @@ async def unstar_mail(
         
         # 로그 기록
         log_entry = MailLog(
-            mail_id=mail.id,
-            user_id=current_user.id,
+            mail_uuid=mail.mail_uuid,
+            user_uuid=current_user.user_uuid,
             action="unstar",
             timestamp=datetime.utcnow()
         )
         db.add(log_entry)
         db.commit()
         
-        logger.info(f"✅ unstar_mail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        logger.info(f"✅ unstar_mail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
         return APIResponse(
             success=True,
             message="메일 중요 표시가 해제되었습니다.",
             data={
-                "mail_id": mail.id,
+                "mail_uuid": mail.mail_uuid,
                 "priority": mail.priority
             }
         )
         
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ unstar_mail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
+        logger.error(f"❌ unstar_mail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 에러: {str(e)}")
         return APIResponse(
             success=False,
             message=f"메일 중요 표시 해제 중 오류가 발생했습니다: {str(e)}",
@@ -999,7 +999,7 @@ async def get_search_suggestions(
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
-            MailUser.user_uuid == current_user.id,
+            MailUser.user_uuid == current_user.user_uuid,
             MailUser.org_id == current_org_id
         ).first()
         
@@ -1014,10 +1014,10 @@ async def get_search_suggestions(
             and_(
                 Mail.org_id == current_org_id,
                 or_(
-                    Mail.sender_uuid == mail_user.id,
-                    Mail.id.in_(
-                        db.query(MailRecipient.mail_id).filter(
-                            MailRecipient.recipient_id == mail_user.id
+                    Mail.sender_uuid == mail_user.user_uuid,
+                    Mail.mail_uuid.in_(
+                        db.query(MailRecipient.mail_uuid).filter(
+                            MailRecipient.recipient_uuid == mail_user.user_uuid
                         )
                     )
                 ),
@@ -1041,10 +1041,10 @@ async def get_search_suggestions(
                 Mail.org_id == current_org_id,
                 MailUser.email.ilike(f"%{query}%"),
                 or_(
-                    Mail.sender_uuid == mail_user.id,
-                    Mail.id.in_(
-                        db.query(MailRecipient.mail_id).filter(
-                            MailRecipient.recipient_id == mail_user.id
+                    Mail.sender_uuid == mail_user.user_uuid,
+                    Mail.mail_uuid.in_(
+                        db.query(MailRecipient.mail_uuid).filter(
+                            MailRecipient.recipient_uuid == mail_user.user_uuid
                         )
                     )
                 )
@@ -1061,12 +1061,12 @@ async def get_search_suggestions(
         
         # 수신자 기반 제안 (조직별 필터링 추가)
         recipient_suggestions = db.query(MailRecipient.email).join(
-            Mail, Mail.id == MailRecipient.mail_id
+            Mail, Mail.mail_uuid == MailRecipient.mail_uuid
         ).filter(
             and_(
                 Mail.org_id == current_org_id,
                 MailRecipient.email.ilike(f"%{query}%"),
-                Mail.sender_uuid == mail_user.id
+                Mail.sender_uuid == mail_user.user_uuid
             )
         ).distinct().limit(limit // 2).all()
         

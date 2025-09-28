@@ -17,7 +17,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 애플리케이션 모델 및 설정 임포트
 from app.config import settings
-from app.model.base_model import Base
+from app.database.user import Base
+
+# 모든 모델을 import하여 메타데이터에 포함
+from app.model.user_model import User
+from app.model.organization_model import Organization, OrganizationStatus, OrganizationSettings, OrganizationUsage
+from app.model.mail_model import MailUser, Mail, MailRecipient
 
 # Alembic Config 객체
 config = context.config
@@ -62,11 +67,6 @@ def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section)
     configuration["sqlalchemy.url"] = settings.get_database_url()
     
-    # SaaS 환경에 맞는 연결 풀 설정
-    configuration["sqlalchemy.pool_size"] = str(settings.DB_POOL_SIZE)
-    configuration["sqlalchemy.max_overflow"] = str(settings.DB_MAX_OVERFLOW)
-    configuration["sqlalchemy.pool_timeout"] = str(settings.DB_POOL_TIMEOUT)
-    
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
@@ -86,13 +86,7 @@ def run_migrations_online() -> None:
         )
 
         with context.begin_transaction():
-            # 마이그레이션 실행 전 로깅
-            context.get_context().info(f"🚀 마이그레이션 실행 시작 - 환경: {settings.ENVIRONMENT}")
-            
             context.run_migrations()
-            
-            # 마이그레이션 실행 후 로깅
-            context.get_context().info(f"✅ 마이그레이션 실행 완료 - 환경: {settings.ENVIRONMENT}")
 
 def include_object(object, name, type_, reflected, compare_to):
     """

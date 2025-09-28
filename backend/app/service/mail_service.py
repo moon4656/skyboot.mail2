@@ -33,16 +33,16 @@ class MailService:
     
     def __init__(self, db: Session):
         self.db = db
-        self.smtp_server = os.getenv("SMTP_SERVER", "localhost")
-        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        self.smtp_server = os.getenv("SMTP_HOST", "localhost")
+        self.smtp_port = int(os.getenv("SMTP_PORT", "25"))
         self.smtp_username = os.getenv("SMTP_USERNAME", "")
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self.use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+        self.use_tls = os.getenv("SMTP_USE_TLS", "false").lower() == "true"
     
     async def send_mail(
         self,
-        org_id: int,
-        sender_user_id: int,
+        org_id: str,
+        sender_uuid: str,
         to_emails: List[str],
         subject: str,
         content: str,
@@ -57,7 +57,7 @@ class MailService:
         
         Args:
             org_id: 조직 ID
-            sender_user_id: 발송자 사용자 ID
+            sender_uuid: 발송자 사용자 ID
             to_emails: 수신자 이메일 목록
             subject: 메일 제목
             content: 메일 내용
@@ -71,15 +71,15 @@ class MailService:
             발송 결과 딕셔너리
         """
         try:
-            logger.info(f"📤 메일 발송 시작 - 조직 ID: {org_id}, 발송자 ID: {sender_user_id}, 수신자: {to_emails}, 제목: {subject}")
+            logger.info(f"📤 메일 발송 시작 - 조직 ID: {org_id}, 발송자 ID: {sender_uuid}, 수신자: {to_emails}, 제목: {subject}")
             
             # 조직 및 사용자 검증
-            organization = self.db.query(Organization).filter(Organization.id == org_id).first()
+            organization = self.db.query(Organization).filter(Organization.org_id == org_id).first()
             if not organization or not organization.is_active:
                 raise HTTPException(status_code=404, detail="조직을 찾을 수 없거나 비활성화되었습니다.")
             
             sender = self.db.query(User).filter(
-                User.id == sender_user_id,
+                User.user_uuid == sender_uuid,
                 User.org_id == org_id,
                 User.is_active == True
             ).first()
@@ -88,18 +88,18 @@ class MailService:
             
             # 발송자 메일 사용자 조회
             sender_mail_user = self.db.query(MailUser).filter(
-                MailUser.user_id == sender_user_id,
+                MailUser.user_uuid == sender_uuid,
                 MailUser.org_id == org_id
             ).first()
             if not sender_mail_user:
                 raise HTTPException(status_code=404, detail="메일 사용자를 찾을 수 없습니다.")
             
             # 메일 ID 생성
-            mail_id = str(uuid.uuid4())
+            mail_uuid = str(uuid.uuid4())
             
             # 메일 레코드 생성
             mail = Mail(
-                mail_id=mail_id,
+                mail_uuid=mail_uuid,
                 org_id=org_id,
                 sender_uuid=sender_mail_user.user_uuid,
                 sender_email=sender_mail_user.email,
@@ -118,7 +118,7 @@ class MailService:
             # TO 수신자
             for email in to_emails:
                 recipient = MailRecipient(
-                    mail_id=mail_id,
+                    mail_uuid=mail_uuid,
                     recipient_email=email,
                     recipient_type=RecipientType.TO.value
                 )
@@ -129,7 +129,7 @@ class MailService:
             if cc_emails:
                 for email in cc_emails:
                     recipient = MailRecipient(
-                        mail_id=mail_id,
+                        mail_uuid=mail_uuid,
                         recipient_email=email,
                         recipient_type=RecipientType.CC.value
                     )
@@ -140,7 +140,7 @@ class MailService:
             if bcc_emails:
                 for email in bcc_emails:
                     recipient = MailRecipient(
-                        mail_id=mail_id,
+                        mail_uuid=mail_uuid,
                         recipient_email=email,
                         recipient_type=RecipientType.BCC.value
                     )
@@ -151,7 +151,7 @@ class MailService:
             if attachments:
                 for attachment in attachments:
                     mail_attachment = MailAttachment(
-                        mail_id=mail_id,
+                        mail_uuid=mail_uuid,
                         filename=attachment["filename"],
                         file_path=attachment["file_path"],
                         file_size=attachment["file_size"],
@@ -170,7 +170,7 @@ class MailService:
             
             # 메일 로그 기록
             mail_log = MailLog(
-                mail_id=mail_id,
+                mail_uuid=mail_uuid,
                 action="send",
                 user_email=sender_mail_user.email,
                 details=f"메일 발송 완료 - 수신자: {len(all_recipients)}명",
@@ -180,20 +180,21 @@ class MailService:
             
             # 보낸 메일함에 저장
             if save_to_sent:
-                sent_folder = await self._get_or_create_folder(org_id, sender_user_id, "sent")
+                sent_folder = await self._get_or_create_folder(org_id, sender_uuid, "sent")
                 mail_in_folder = MailInFolder(
-                    mail_id=mail_id,
-                    folder_id=sent_folder.folder_id
+                    mail_uuid=mail_uuid,
+                    folder_uuid=sent_folder.folder_uuid,
+                    user_uuid=sender_uuid
                 )
                 self.db.add(mail_in_folder)
             
             self.db.commit()
             
-            logger.info(f"✅ 메일 발송 완료 - 메일 ID: {mail_id}")
+            logger.info(f"✅ 메일 발송 완료 - 메일 UUID: {mail_uuid}")
             
             return {
                 "success": True,
-                "mail_id": mail_id,
+                "mail_uuid": mail_uuid,
                 "message": "메일이 성공적으로 발송되었습니다.",
                 "recipients_count": len(all_recipients),
                 "sent_at": mail.sent_at.isoformat()
@@ -264,8 +265,8 @@ class MailService:
     
     async def get_mails_by_folder(
         self,
-        org_id: int,
-        user_id: int,
+        org_id: str,
+        user_uuid: str,
         folder_type: str,
         page: int = 1,
         limit: int = 20,
@@ -277,7 +278,7 @@ class MailService:
         
         Args:
             org_id: 조직 ID
-            user_id: 사용자 ID
+            user_uuid: 사용자 UUID
             folder_type: 폴더 타입 (inbox, sent, drafts, trash)
             page: 페이지 번호
             limit: 페이지당 항목 수
@@ -292,7 +293,7 @@ class MailService:
             
             # 사용자 검증
             user = self.db.query(User).filter(
-                User.id == user_id,
+                User.user_uuid == user_uuid,
                 User.org_id == org_id,
                 User.is_active == True
             ).first()
@@ -301,7 +302,7 @@ class MailService:
             
             # 메일 사용자 조회
             mail_user = self.db.query(MailUser).filter(
-                MailUser.user_id == user_id,
+                MailUser.user_uuid == user_uuid,
                 MailUser.org_id == org_id
             ).first()
             if not mail_user:
@@ -313,9 +314,11 @@ class MailService:
             # 폴더별 쿼리 구성
             if folder_type == "inbox":
                 # 받은 메일함
-                query = self.db.query(Mail).join(MailRecipient).filter(
+                query = self.db.query(Mail).join(
+                    MailRecipient, Mail.mail_uuid == MailRecipient.mail_uuid
+                ).filter(
                     Mail.org_id == org_id,
-                    MailRecipient.recipient_email == mail_user.email,
+                    MailRecipient.recipient_uuid == mail_user.user_uuid,
                     Mail.status != MailStatus.DELETED.value
                 )
             elif folder_type == "sent":
@@ -333,17 +336,15 @@ class MailService:
                     Mail.status == MailStatus.DRAFT.value
                 )
             elif folder_type == "trash":
-                # 휴지통
+                # 휴지통 - 삭제된 메일만 조회
                 query = self.db.query(Mail).filter(
                     Mail.org_id == org_id,
+                    Mail.status == MailStatus.DELETED.value,
                     or_(
-                        and_(Mail.sender_uuid == mail_user.user_uuid, Mail.status == MailStatus.DELETED.value),
-                        and_(
-                            Mail.mail_id.in_(
-                                self.db.query(MailRecipient.mail_id).filter(
-                                    MailRecipient.recipient_email == mail_user.email,
-                                    MailRecipient.is_deleted == True
-                                )
+                        Mail.sender_uuid == mail_user.user_uuid,
+                        Mail.mail_uuid.in_(
+                            self.db.query(MailRecipient.mail_uuid).filter(
+                                MailRecipient.recipient_uuid == mail_user.user_uuid
                             )
                         )
                     )
@@ -374,16 +375,16 @@ class MailService:
             for mail in mails:
                 # 수신자 정보 조회
                 recipients = self.db.query(MailRecipient).filter(
-                    MailRecipient.mail_id == mail.mail_id
+                    MailRecipient.mail_uuid == mail.mail_uuid
                 ).all()
                 
                 # 첨부파일 정보 조회
                 attachments = self.db.query(MailAttachment).filter(
-                    MailAttachment.mail_id == mail.mail_id
+                    MailAttachment.mail_uuid == mail.mail_uuid
                 ).all()
                 
                 mail_data = {
-                    "mail_id": mail.mail_id,
+                    "mail_uuid": mail.mail_uuid,
                     "sender_email": mail.sender_email,
                     "subject": mail.subject,
                     "content": mail.content[:200] + "..." if len(mail.content) > 200 else mail.content,
@@ -420,17 +421,17 @@ class MailService:
     
     async def get_mail_detail(
         self,
-        org_id: int,
-        user_id: int,
-        mail_id: str
+        org_id: str,
+        user_uuid: str,
+        mail_uuid: str
     ) -> Dict[str, Any]:
         """
         조직 내 사용자의 특정 메일 상세 정보를 조회합니다.
         
         Args:
             org_id: 조직 ID
-            user_id: 사용자 ID
-            mail_id: 메일 ID
+            user_uuid: 사용자 UUID
+            mail_uuid: 메일 UUID
             
         Returns:
             메일 상세 정보
@@ -440,7 +441,7 @@ class MailService:
             
             # 사용자 검증
             user = self.db.query(User).filter(
-                User.id == user_id,
+                User.user_uuid == user_uuid,
                 User.org_id == org_id,
                 User.is_active == True
             ).first()
@@ -449,7 +450,7 @@ class MailService:
             
             # 메일 사용자 조회
             mail_user = self.db.query(MailUser).filter(
-                MailUser.user_id == user_id,
+                MailUser.user_uuid == user.user_uuid,
                 MailUser.org_id == org_id
             ).first()
             if not mail_user:
@@ -457,7 +458,7 @@ class MailService:
             
             # 메일 조회 (조직 내에서만)
             mail = self.db.query(Mail).filter(
-                Mail.mail_id == mail_id,
+                Mail.mail_uuid == mail_uuid,
                 Mail.org_id == org_id
             ).first()
             if not mail:
@@ -466,7 +467,7 @@ class MailService:
             # 접근 권한 확인 (발송자이거나 수신자여야 함)
             is_sender = mail.sender_uuid == mail_user.user_uuid
             is_recipient = self.db.query(MailRecipient).filter(
-                MailRecipient.mail_id == mail_id,
+                MailRecipient.mail_uuid == mail_uuid,
                 MailRecipient.recipient_email == mail_user.email
             ).first() is not None
             
@@ -475,18 +476,18 @@ class MailService:
             
             # 수신자 정보 조회
             recipients = self.db.query(MailRecipient).filter(
-                MailRecipient.mail_id == mail_id
+                MailRecipient.mail_uuid == mail_uuid
             ).all()
             
             # 첨부파일 정보 조회
             attachments = self.db.query(MailAttachment).filter(
-                MailAttachment.mail_id == mail_id
+                MailAttachment.mail_uuid == mail_uuid
             ).all()
             
             # 읽음 처리 (수신자인 경우)
             if is_recipient:
                 recipient_record = self.db.query(MailRecipient).filter(
-                    MailRecipient.mail_id == mail_id,
+                    MailRecipient.mail_uuid == mail_uuid,
                     MailRecipient.recipient_email == mail_user.email
                 ).first()
                 if recipient_record and not recipient_record.is_read:
@@ -495,7 +496,7 @@ class MailService:
                     self.db.commit()
             
             return {
-                "mail_id": mail.mail_id,
+                "mail_uuid": mail.mail_uuid,
                 "sender_email": mail.sender_email,
                 "subject": mail.subject,
                 "content": mail.content,
@@ -527,9 +528,9 @@ class MailService:
     
     async def delete_mail(
         self,
-        org_id: int,
-        user_id: int,
-        mail_id: str,
+        org_id: str,
+        user_uuid: str,
+        mail_uuid: str,
         permanent: bool = False
     ) -> bool:
         """
@@ -537,9 +538,9 @@ class MailService:
         
         Args:
             org_id: 조직 ID
-            user_id: 사용자 ID
-            mail_id: 메일 ID
-            permanent: 영구 삭제 여부
+            user_uuid: str,
+            mail_uuid: str,
+            permanent: bool = False
             
         Returns:
             삭제 성공 여부
@@ -549,7 +550,7 @@ class MailService:
             
             # 사용자 검증
             user = self.db.query(User).filter(
-                User.id == user_id,
+                User.user_uuid == user_uuid,
                 User.org_id == org_id,
                 User.is_active == True
             ).first()
@@ -558,7 +559,7 @@ class MailService:
             
             # 메일 사용자 조회
             mail_user = self.db.query(MailUser).filter(
-                MailUser.user_id == user_id,
+                MailUser.user_uuid == user_uuid,
                 MailUser.org_id == org_id
             ).first()
             if not mail_user:
@@ -566,7 +567,7 @@ class MailService:
             
             # 메일 조회
             mail = self.db.query(Mail).filter(
-                Mail.mail_id == mail_id,
+                Mail.mail_uuid == mail_uuid,
                 Mail.org_id == org_id
             ).first()
             if not mail:
@@ -575,7 +576,7 @@ class MailService:
             # 접근 권한 확인
             is_sender = mail.sender_uuid == mail_user.user_uuid
             recipient_record = self.db.query(MailRecipient).filter(
-                MailRecipient.mail_id == mail_id,
+                MailRecipient.mail_uuid == mail_uuid,
                 MailRecipient.recipient_email == mail_user.email
             ).first()
             
@@ -601,7 +602,7 @@ class MailService:
             
             # 메일 로그 기록
             mail_log = MailLog(
-                mail_id=mail_id,
+                mail_uuid=mail_uuid,
                 action="delete" if not permanent else "permanent_delete",
                 user_email=mail_user.email,
                 details=f"메일 {'영구 ' if permanent else ''}삭제",
@@ -611,7 +612,7 @@ class MailService:
             
             self.db.commit()
             
-            logger.info(f"✅ 메일 삭제 완료 - 메일 ID: {mail_id}")
+            logger.info(f"✅ 메일 삭제 완료 - 메일 UUID: {mail_uuid}")
             return True
             
         except Exception as e:
@@ -621,15 +622,15 @@ class MailService:
     
     async def get_mail_stats(
         self,
-        org_id: int,
-        user_id: int
+        org_id: str,
+        user_uuid: str
     ) -> Dict[str, Any]:
         """
         조직 내 사용자의 메일 통계를 조회합니다.
         
         Args:
             org_id: 조직 ID
-            user_id: 사용자 ID
+            user_uuid: 사용자 UUID
             
         Returns:
             메일 통계 정보
@@ -639,7 +640,7 @@ class MailService:
             
             # 사용자 검증
             user = self.db.query(User).filter(
-                User.id == user_id,
+                User.user_uuid == user_uuid,
                 User.org_id == org_id,
                 User.is_active == True
             ).first()
@@ -648,50 +649,50 @@ class MailService:
             
             # 메일 사용자 조회
             mail_user = self.db.query(MailUser).filter(
-                MailUser.user_id == user_id,
+                MailUser.user_uuid == user_uuid,
                 MailUser.org_id == org_id
             ).first()
             if not mail_user:
                 raise HTTPException(status_code=404, detail="메일 사용자를 찾을 수 없습니다.")
             
             # 보낸 메일 수
-            sent_count = self.db.query(func.count(Mail.mail_id)).filter(
+            sent_count = self.db.query(func.count(Mail.mail_uuid)).filter(
                 Mail.org_id == org_id,
                 Mail.sender_uuid == mail_user.user_uuid,
                 Mail.status == MailStatus.SENT.value
             ).scalar()
             
             # 받은 메일 수
-            received_count = self.db.query(func.count(MailRecipient.mail_id)).join(Mail).filter(
+            received_count = self.db.query(func.count(MailRecipient.mail_uuid)).join(Mail).filter(
                 Mail.org_id == org_id,
-                MailRecipient.recipient_email == mail_user.email,
+                MailRecipient.recipient_uuid == mail_user.user_uuid,
                 Mail.status != MailStatus.DELETED.value
             ).scalar()
             
             # 읽지 않은 메일 수
-            unread_count = self.db.query(func.count(MailRecipient.mail_id)).join(Mail).filter(
+            unread_count = self.db.query(func.count(MailRecipient.mail_uuid)).join(Mail).filter(
                 Mail.org_id == org_id,
-                MailRecipient.recipient_email == mail_user.email,
+                MailRecipient.recipient_uuid == mail_user.user_uuid,
                 MailRecipient.is_read == False,
                 Mail.status != MailStatus.DELETED.value
             ).scalar()
             
             # 임시보관함 메일 수
-            draft_count = self.db.query(func.count(Mail.mail_id)).filter(
+            draft_count = self.db.query(func.count(Mail.mail_uuid)).filter(
                 Mail.org_id == org_id,
                 Mail.sender_uuid == mail_user.user_uuid,
                 Mail.status == MailStatus.DRAFT.value
             ).scalar()
             
             # 휴지통 메일 수
-            trash_count = self.db.query(func.count(Mail.mail_id)).filter(
+            trash_count = self.db.query(func.count(Mail.mail_uuid)).filter(
                 Mail.org_id == org_id,
                 or_(
                     and_(Mail.sender_uuid == mail_user.user_uuid, Mail.status == MailStatus.DELETED.value),
                     and_(
-                        Mail.mail_id.in_(
-                            self.db.query(MailRecipient.mail_id).filter(
-                                MailRecipient.recipient_email == mail_user.email,
+                        Mail.mail_uuid.in_(
+                            self.db.query(MailRecipient.mail_uuid).filter(
+                                MailRecipient.recipient_uuid == mail_user.user_uuid,
                                 MailRecipient.is_deleted == True
                             )
                         )
@@ -714,31 +715,31 @@ class MailService:
     
     async def _get_or_create_folder(
         self,
-        org_id: int,
-        user_id: int,
+        org_id: str,
+        user_uuid: str,
         folder_name: str
     ) -> MailFolder:
         """
         폴더를 조회하거나 생성합니다.
         
         Args:
-            org_id: 조직 ID
-            user_id: 사용자 ID
+            org_id: 조직 UUID
+            user_uuid: 사용자 UUID
             folder_name: 폴더명
             
         Returns:
             폴더 객체
         """
         folder = self.db.query(MailFolder).filter(
-            MailFolder.user_id == user_id,
-            MailFolder.folder_name == folder_name
+            MailFolder.user_uuid == user_uuid,  
+            MailFolder.name == folder_name
         ).first()
         
         if not folder:
             folder = MailFolder(
-                folder_id=str(uuid.uuid4()),
-                user_id=user_id,
-                folder_name=folder_name,
+                folder_uuid=str(uuid.uuid4()),
+                user_uuid=user_uuid,
+                name=folder_name,
                 created_at=datetime.now(timezone.utc)
             )
             self.db.add(folder)

@@ -49,6 +49,8 @@ class SaaSSettings(BaseSettings):
     DEFAULT_ORG_DOMAIN: str = "skyboot.mail"
     MAX_ORGS_PER_USER: int = 5
     MAX_USERS_PER_ORG: int = 1000
+    DEFAULT_MAX_USERS_PER_ORG: int = 1000
+    DEFAULT_MAX_STORAGE_PER_ORG: int = 10  # GB
     ORG_SUBDOMAIN_ENABLED: bool = True
     
     # 메일 서버 설정 (조직별 설정 가능)
@@ -58,6 +60,9 @@ class SaaSSettings(BaseSettings):
     DEFAULT_SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD")
     DEFAULT_SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", "noreply@skyboot.mail")
     DEFAULT_SMTP_FROM_NAME: str = "SkyBoot Mail SaaS"
+    
+    # 메일 할당량 설정
+    DEFAULT_MAIL_QUOTA_MB: int = int(os.getenv("DEFAULT_MAIL_QUOTA_MB", "1000"))  # 기본 1GB
     
     # Postfix 설정 (다중 도메인 지원)
     POSTFIX_CONFIG_DIR: str = "/etc/postfix"

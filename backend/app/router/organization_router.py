@@ -4,9 +4,11 @@
 SaaS 다중 조직 지원을 위한 조직 관리 API 엔드포인트
 """
 import logging
+import traceback
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Path
 from sqlalchemy.orm import Session
+from pydantic import ValidationError
 
 from ..database import get_db
 from ..service.auth_service import get_current_user, get_current_admin_user
@@ -18,7 +20,7 @@ from ..schemas.organization_schema import (
     OrganizationSettingsResponse, OrganizationSettingsUpdate
 )
 from ..service.organization_service import get_organization_service, OrganizationService
-from ..middleware.tenant import get_current_org, require_org
+from ..middleware.tenant_middleware import get_current_org, get_current_org_id_from_context, require_org
 
 # 로거 설정
 logger = logging.getLogger(__name__)
@@ -56,6 +58,7 @@ async def create_organization(
     """
     try:
         logger.info(f"🏢 조직 생성 요청: {org_request.organization.name}")
+        logger.info(f"📋 요청 데이터 - org_code: {org_request.organization.org_code}, subdomain: {org_request.organization.subdomain}")
         
         result = await org_service.create_organization(
             org_data=org_request.organization,
@@ -69,8 +72,15 @@ async def create_organization(
         
     except HTTPException:
         raise
+    except ValidationError as e:
+        logger.error(f"❌ 조직 생성 검증 오류: {e.errors()}")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"입력 데이터 검증 오류: {e.errors()}"
+        )
     except Exception as e:
         logger.error(f"❌ 조직 생성 API 오류: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="조직 생성 중 오류가 발생했습니다."
@@ -78,7 +88,7 @@ async def create_organization(
 
 
 @router.get(
-    "/",
+    "/list",
     response_model=OrganizationListResponse,
     summary="조직 목록 조회",
     description="조직 목록을 조회합니다. (시스템 관리자만 접근 가능)"
@@ -106,15 +116,26 @@ async def list_organizations(
         # skip 계산
         skip = (page - 1) * limit
         
+        # 성능 최적화: 단일 쿼리로 목록과 개수를 함께 조회
         organizations = await org_service.list_organizations(
             skip=skip,
-            limit=limit,
+            limit=limit + 1,  # 다음 페이지 존재 여부 확인을 위해 +1
             search=search,
             is_active=is_active
         )
         
-        # 전체 개수 조회
-        total = await org_service.count_organizations(search=search, is_active=is_active)
+        # 다음 페이지 존재 여부 확인 및 실제 결과 조정
+        has_more = len(organizations) > limit
+        if has_more:
+            organizations = organizations[:limit]
+        
+        # 전체 개수는 첫 페이지에서만 정확히 계산, 나머지는 추정
+        if skip == 0:
+            total = await org_service.count_organizations(search=search, is_active=is_active)
+        else:
+            # 추정값 계산 (정확하지 않지만 성능상 이점)
+            total = skip + len(organizations) + (1 if has_more else 0)
+        
         total_pages = (total + limit - 1) // limit
         
         logger.info(f"✅ 조직 목록 조회 완료: {len(organizations)}개 (전체: {total}개)")
@@ -143,7 +164,7 @@ async def list_organizations(
 )
 async def get_current_organization(
     current_user: User = Depends(get_current_user),
-    current_org: int = Depends(get_current_org),
+    current_org: str = Depends(get_current_org_id_from_context),
     db: Session = Depends(get_db),
     org_service: OrganizationService = Depends(get_organization_service)
 ):
@@ -155,7 +176,7 @@ async def get_current_organization(
     try:
         logger.info(f"🏢 현재 조직 정보 조회 - 사용자: {current_user.email}, 조직: {current_org}")
         
-        organization = await org_service.get_organization(current_org)
+        organization = await org_service.get_organization_by_id(current_org)
         
         if not organization:
             raise HTTPException(
@@ -183,9 +204,9 @@ async def get_current_organization(
     description="특정 조직의 정보를 조회합니다."
 )
 async def get_organization(
-    org_id: int,
+    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
     current_user: User = Depends(get_current_user),
-    current_org: int = Depends(require_org),
+    current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
     org_service: OrganizationService = Depends(get_organization_service)
 ):
@@ -200,14 +221,21 @@ async def get_organization(
     try:
         logger.info(f"🏢 조직 정보 조회 - ID: {org_id}, 사용자: {current_user.email}")
         
+        # 입력 검증: 빈 문자열 확인
+        if not org_id or org_id.strip() == "":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="조직을 찾을 수 없습니다."
+            )
+        
         # 권한 확인: 일반 사용자는 자신의 조직만 조회 가능
-        if not current_user.is_admin and org_id != current_org:
+        if current_user.role not in ["system_admin", "admin"] and org_id != current_org:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="다른 조직의 정보에 접근할 권한이 없습니다."
             )
         
-        organization = await org_service.get_organization(org_id)
+        organization = await org_service.get_organization_by_id(org_id)
         
         if not organization:
             raise HTTPException(
@@ -235,10 +263,10 @@ async def get_organization(
     description="조직 정보를 수정합니다. (조직 관리자 권한 필요)"
 )
 async def update_organization(
-    org_id: int,
     org_update: OrganizationUpdate,
+    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
     current_user: User = Depends(get_current_user),
-    current_org: int = Depends(require_org),
+    current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
     org_service: OrganizationService = Depends(get_organization_service)
 ):
@@ -259,7 +287,7 @@ async def update_organization(
         logger.info(f"✏️ 조직 정보 수정 요청 - ID: {org_id}, 사용자: {current_user.email}")
         
         # 권한 확인: 조직 관리자 또는 시스템 관리자만 수정 가능
-        if not current_user.is_admin and org_id != current_org:
+        if current_user.role not in ["admin", "system_admin"] and org_id != current_org:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="조직 정보를 수정할 권한이 없습니다."
@@ -293,7 +321,7 @@ async def update_organization(
     description="조직을 삭제합니다. (시스템 관리자 권한 필요)"
 )
 async def delete_organization(
-    org_id: int,
+    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
     force: bool = Query(False, description="강제 삭제 여부 (하드 삭제)"),
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
@@ -339,9 +367,9 @@ async def delete_organization(
     description="조직의 사용량 및 통계 정보를 조회합니다."
 )
 async def get_organization_stats(
-    org_id: int,
+    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
     current_user: User = Depends(get_current_user),
-    current_org: int = Depends(require_org),
+    current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
     org_service: OrganizationService = Depends(get_organization_service)
 ):
@@ -357,7 +385,7 @@ async def get_organization_stats(
         logger.info(f"📊 조직 통계 조회 - ID: {org_id}, 사용자: {current_user.email}")
         
         # 권한 확인: 조직 관리자 또는 시스템 관리자만 조회 가능
-        if not current_user.is_admin and org_id != current_org:
+        if current_user.role not in ["admin", "system_admin"] and org_id != current_org:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="조직 통계에 접근할 권한이 없습니다."
@@ -392,7 +420,7 @@ async def get_organization_stats(
 )
 async def get_current_organization_stats(
     current_user: User = Depends(get_current_user),
-    current_org: int = Depends(get_current_org),
+    current_org: str = Depends(get_current_org_id_from_context),
     db: Session = Depends(get_db),
     org_service: OrganizationService = Depends(get_organization_service)
 ):
@@ -433,9 +461,9 @@ async def get_current_organization_stats(
     description="조직의 설정 정보를 조회합니다."
 )
 async def get_organization_settings(
-    org_id: int,
+    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
     current_user: User = Depends(get_current_user),
-    current_org: int = Depends(require_org),
+    current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
     org_service: OrganizationService = Depends(get_organization_service)
 ):
@@ -451,7 +479,7 @@ async def get_organization_settings(
         logger.info(f"⚙️ 조직 설정 조회 - ID: {org_id}, 사용자: {current_user.email}")
         
         # 권한 확인: 조직 관리자 또는 시스템 관리자만 조회 가능
-        if not current_user.is_admin and org_id != current_org:
+        if current_user.role not in ["admin", "system_admin"] and org_id != current_org:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="조직 설정에 접근할 권한이 없습니다."
@@ -485,10 +513,10 @@ async def get_organization_settings(
     description="조직의 설정 정보를 수정합니다."
 )
 async def update_organization_settings(
-    org_id: int,
     settings_update: OrganizationSettingsUpdate,
+    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
     current_user: User = Depends(get_current_user),
-    current_org: int = Depends(require_org),
+    current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
     org_service: OrganizationService = Depends(get_organization_service)
 ):
@@ -512,7 +540,7 @@ async def update_organization_settings(
         logger.info(f"⚙️ 조직 설정 수정 요청 - ID: {org_id}, 사용자: {current_user.email}")
         
         # 권한 확인: 조직 관리자 또는 시스템 관리자만 수정 가능
-        if not current_user.is_admin and org_id != current_org:
+        if current_user.role not in ["admin", "system_admin"] and org_id != current_org:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="조직 설정을 수정할 권한이 없습니다."
@@ -547,7 +575,7 @@ async def update_organization_settings(
 )
 async def get_current_organization_settings(
     current_user: User = Depends(get_current_user),
-    current_org: int = Depends(get_current_org),
+    current_org: str = Depends(get_current_org_id_from_context),
     db: Session = Depends(get_db),
     org_service: OrganizationService = Depends(get_organization_service)
 ):

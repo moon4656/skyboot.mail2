@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, UniqueConstraint, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from ..database.base import Base
+from ..database.user import Base
 import uuid
 from enum import Enum
 
@@ -16,7 +16,7 @@ class Organization(Base):
     """조직/기업 모델 - SaaS의 핵심 테넌트"""
     __tablename__ = "organizations"
     
-    org_id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()), comment="조직 고유 ID")
+    org_id = Column(String(36), primary_key=True, index=True, nullable=False, comment="조직 고유 ID")
     org_code = Column(String(50), unique=True, index=True, nullable=False, comment="조직 코드 (subdomain용)")
     name = Column(String(200), nullable=False, comment="조직명")
     display_name = Column(String(200), comment="표시용 조직명")

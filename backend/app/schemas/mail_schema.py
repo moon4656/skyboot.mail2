@@ -116,7 +116,7 @@ class MailResponse(MailBase):
     sent_at: Optional[datetime]
     created_at: datetime
     updated_at: datetime
-    sender: MailUserResponse
+    sender_uuid: MailUserResponse
     recipients: List[RecipientResponse]
     attachments: List[AttachmentResponse]
     
@@ -138,7 +138,7 @@ class MailListResponse(BaseModel):
     priority: MailPriority
     sent_at: Optional[datetime]
     created_at: datetime
-    sender: MailUserResponse
+    sender_uuid: MailUserResponse
     recipient_count: int
     attachment_count: int
     is_read: Optional[bool] = None  # 받은 메일의 경우에만 사용

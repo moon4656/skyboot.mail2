@@ -1,0 +1,162 @@
+{
+  "table_name": "users",
+  "backup_timestamp": "20250925_234818",
+  "record_count": 9,
+  "columns_info": [
+    {
+      "column_name": "user_id",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "column_name": "email",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "column_name": "username",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "column_name": "hashed_password",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "column_name": "is_active",
+      "data_type": "boolean",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES",
+      "column_default": "now()"
+    },
+    {
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "column_name": "user_uuid",
+      "data_type": "character varying",
+      "is_nullable": "YES",
+      "column_default": null
+    },
+    {
+      "column_name": "organization_id",
+      "data_type": "integer",
+      "is_nullable": "YES",
+      "column_default": null
+    }
+  ],
+  "data": [
+    {
+      "user_id": "3bc2ef9e-f5f7-46ee-8511-dbcf0fb8d11b",
+      "email": "test@example.com",
+      "username": "testuser",
+      "hashed_password": "$2b$12$x7DHyHwxkmCq4NrQgYiO7edryuLAOnDUocV/MX7blEfd8DO8Swk3y",
+      "is_active": true,
+      "created_at": "2025-09-18T00:15:46.740044+09:00",
+      "updated_at": null,
+      "user_uuid": "4fd7626f-6ae1-48f0-ac3d-d29d1db08524",
+      "organization_id": 1
+    },
+    {
+      "user_id": "05301145-bc55-45c7-8343-f1af09f37aaa",
+      "email": "user01@example.com",
+      "username": "user01",
+      "hashed_password": "$2b$12$gaG3ViAXYNm6b..Qrv6r2urmBYe/Rq2eg9r649VLyGUU1wXLKMoEq",
+      "is_active": true,
+      "created_at": "2025-09-18T00:26:20.545712+09:00",
+      "updated_at": null,
+      "user_uuid": "0b349666-1507-4a37-bcbf-3cbab03b4bca",
+      "organization_id": 1
+    },
+    {
+      "user_id": "07bc32dd-09c2-46e6-b2cb-4a36c29463f8",
+      "email": "test@skyboot.com",
+      "username": "skybootuser",
+      "hashed_password": "$2b$12$JQQSIvJw812XvFdMp55TZ.oBzes4q9Aui53owY8iJNxB8u87wWbaq",
+      "is_active": true,
+      "created_at": "2025-09-18T00:31:23.262132+09:00",
+      "updated_at": null,
+      "user_uuid": "a4581c5e-3b8c-4f06-8ae1-478a8d0bde19",
+      "organization_id": 1
+    },
+    {
+      "user_id": "c4ef9ea9-6512-44a6-bfff-4457aba299ff",
+      "email": "star_test_42865be6-c661-4940-b494-68038b25551a@example.com",
+      "username": "star_test_42865be6-c661-4940-b494-68038b25551a",
+      "hashed_password": "$2b$12$gRNSpfNu4cd0EZacYmWHeu1VZUbyrykDTGDaEyP.2S2DPs3vmITGC",
+      "is_active": true,
+      "created_at": "2025-09-18T11:22:05.501750+09:00",
+      "updated_at": null,
+      "user_uuid": "802b5004-76e0-4ff0-be46-f09f6752cc29",
+      "organization_id": 1
+    },
+    {
+      "user_id": "8ca58a66-0aab-48fe-974d-bc14dc700834",
+      "email": "star_test_3262748d-a37b-4cda-8f91-83c725d90784@example.com",
+      "username": "star_test_3262748d-a37b-4cda-8f91-83c725d90784",
+      "hashed_password": "$2b$12$yHAru23uWB3B5KJmwMNM5Ozz.Yrg9LJg0rM7etRsQ6fXPavW1brpG",
+      "is_active": true,
+      "created_at": "2025-09-18T11:22:26.892553+09:00",
+      "updated_at": null,
+      "user_uuid": "98cd63a9-6bc8-4eb9-9f96-c747c2f010fc",
+      "organization_id": 1
+    },
+    {
+      "user_id": "3f9b3cc8-b7a2-402a-9d10-9aeb2cbd05aa",
+      "email": "star_test_cd098e4b-9004-4f13-affa-defdcc5e0133@example.com",
+      "username": "star_test_cd098e4b-9004-4f13-affa-defdcc5e0133",
+      "hashed_password": "$2b$12$VP4hLKPUxkslVlUNoPEq9OOtTJLTBbypOgTLhoQj7q7Ys1i0cudee",
+      "is_active": true,
+      "created_at": "2025-09-18T11:24:57.385795+09:00",
+      "updated_at": null,
+      "user_uuid": "84b3de0b-f967-4805-89f5-b1e557bb8796",
+      "organization_id": 1
+    },
+    {
+      "user_id": "9dc15e30-d004-4c35-9133-3344a9c2f8a7",
+      "email": "star_test_5796456d-97a4-4031-a6c8-0e811e35432f@example.com",
+      "username": "star_test_5796456d-97a4-4031-a6c8-0e811e35432f",
+      "hashed_password": "$2b$12$ycL5dN8j09WyCKQ00P4iK.xig3h6FW2kX5GF3HE9vaFQhkue2lQwe",
+      "is_active": true,
+      "created_at": "2025-09-18T11:26:00.968854+09:00",
+      "updated_at": null,
+      "user_uuid": "ecb56897-d366-4f45-8da9-06b9b59fe598",
+      "organization_id": 1
+    },
+    {
+      "user_id": "d8672dbe-1c6a-4654-9101-b76ae46df175",
+      "email": "star_test_0328212f-07b9-4909-8947-6517e97786ab@example.com",
+      "username": "star_test_0328212f-07b9-4909-8947-6517e97786ab",
+      "hashed_password": "$2b$12$tySN2V4SAcB/M808zl4viOaxe7jAoirAgaSlEy5Q9j.dFtPpSm1Zq",
+      "is_active": true,
+      "created_at": "2025-09-18T11:27:48.497047+09:00",
+      "updated_at": null,
+      "user_uuid": "b124cdcd-41f1-4cf3-bc32-db0650cefe75",
+      "organization_id": 1
+    },
+    {
+      "user_id": "ed3d9744-24d9-4454-8794-99ea82fa0ea1",
+      "email": "star_test_210040e2-4c96-4dfe-b238-13c6f8635bf7@example.com",
+      "username": "star_test_210040e2-4c96-4dfe-b238-13c6f8635bf7",
+      "hashed_password": "$2b$12$Lr87O42UH4AYNIxwmvgbouoM9CHbvbPQsGnmdrCZjA2iTwfsXO/ee",
+      "is_active": true,
+      "created_at": "2025-09-18T11:28:24.245645+09:00",
+      "updated_at": null,
+      "user_uuid": "d2a59d1e-a5da-4fea-adc7-951201c307c6",
+      "organization_id": 1
+    }
+  ]
+}

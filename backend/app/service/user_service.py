@@ -14,7 +14,7 @@ from fastapi import HTTPException
 from ..model.user_model import User
 from ..model.mail_model import MailUser
 from ..model.organization_model import Organization
-from ..schemas.base_schema import (
+from ..schemas.user_schema import (
     UserCreate, UserResponse, UserLogin
 )
 from ..config import settings
@@ -43,7 +43,7 @@ class UserService:
 
     async def create_user(
         self, 
-        org_id: int, 
+        org_id: str, 
         user_data: UserCreate,
         created_by_admin: bool = False
     ) -> UserResponse:
@@ -65,7 +65,7 @@ class UserService:
             logger.info(f"👤 사용자 생성 시작 - 조직: {org_id}, 이메일: {user_data.email}")
             
             # 1. 조직 존재 확인
-            org = self.db.query(Organization).filter(Organization.id == org_id).first()
+            org = self.db.query(Organization).filter(Organization.org_id == org_id).first()
             if not org:
                 raise HTTPException(
                     status_code=404,
@@ -79,7 +79,7 @@ class UserService:
                 )
             
             # 2. 조직 내 사용자 수 제한 확인
-            current_user_count = self.db.query(func.count(User.id)).filter(
+            current_user_count = self.db.query(func.count(User.user_id)).filter(
                 User.org_id == org_id,
                 User.is_active == True
             ).scalar()
@@ -123,15 +123,14 @@ class UserService:
             password_hash = AuthService.get_password_hash(user_data.password)
             
             new_user = User(
-                id=str(uuid.uuid4()),  # UUID로 ID 생성
+                user_id=str(uuid.uuid4()),  # UUID로 ID 생성
                 user_uuid=user_uuid,
                 org_id=org_id,
                 username=user_data.username,
                 email=user_data.email,
-                password_hash=password_hash,
-                full_name=getattr(user_data, 'full_name', None),
+                hashed_password=password_hash,
                 is_active=True,
-                is_admin=False,  # 기본적으로 일반 사용자
+                role="user",  # 기본적으로 일반 사용자
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc)
             )
@@ -139,11 +138,11 @@ class UserService:
             self.db.add(new_user)
             self.db.flush()  # ID 생성을 위해 flush
             
-            logger.info(f"✅ 사용자 생성 완료: {new_user.email} (ID: {new_user.id})")
+            logger.info(f"✅ 사용자 생성 완료: {new_user.email} (ID: {new_user.user_id})")
             
             # 6. 메일 사용자 생성
             await self._create_mail_user(
-                user_id=new_user.id,
+                user_id=new_user.user_id,
                 org_id=org_id,
                 email=user_data.email,
                 password_hash=password_hash
@@ -154,10 +153,13 @@ class UserService:
             logger.info(f"🎉 사용자 '{new_user.email}' 생성 및 초기화 완료")
             
             return UserResponse(
-                id=new_user.id,
+                id=new_user.user_id,
+                user_id=new_user.user_id,
                 user_uuid=new_user.user_uuid,
                 email=new_user.email,
                 username=new_user.username,
+                org_id=new_user.org_id,
+                role=new_user.role,
                 is_active=new_user.is_active,
                 created_at=new_user.created_at,
                 updated_at=new_user.updated_at
@@ -174,7 +176,7 @@ class UserService:
                 detail=f"사용자 생성 중 오류가 발생했습니다: {str(e)}"
             )
 
-    async def get_user_by_id(self, org_id: int, user_id: int) -> Optional[UserResponse]:
+    async def get_user_by_id(self, org_id: str, user_id: str) -> Optional[UserResponse]:
         """
         조직 내에서 사용자 ID로 사용자를 조회합니다.
         
@@ -189,7 +191,7 @@ class UserService:
             user = self.db.query(User).filter(
                 and_(
                     User.org_id == org_id,
-                    User.id == user_id
+                    User.user_id == user_id
                 )
             ).first()
             
@@ -197,10 +199,13 @@ class UserService:
                 return None
             
             return UserResponse(
-                id=user.id,
+                id=user.user_id,
+                user_id=user.user_id,
                 user_uuid=user.user_uuid,
                 email=user.email,
                 username=user.username,
+                org_id=user.org_id,
+                role=user.role,
                 is_active=user.is_active,
                 created_at=user.created_at,
                 updated_at=user.updated_at
@@ -210,7 +215,7 @@ class UserService:
             logger.error(f"❌ 사용자 조회 오류: {str(e)}")
             return None
 
-    async def get_user_by_email(self, org_id: int, email: str) -> Optional[UserResponse]:
+    async def get_user_by_email(self, org_id: str, email: str) -> Optional[UserResponse]:
         """
         조직 내에서 이메일로 사용자를 조회합니다.
         
@@ -233,10 +238,13 @@ class UserService:
                 return None
             
             return UserResponse(
-                id=user.id,
+                id=user.user_id,
+                user_id=user.user_id,
                 user_uuid=user.user_uuid,
                 email=user.email,
                 username=user.username,
+                org_id=user.org_id,
+                role=user.role,
                 is_active=user.is_active,
                 created_at=user.created_at,
                 updated_at=user.updated_at
@@ -248,7 +256,7 @@ class UserService:
 
     async def get_users_by_org(
         self, 
-        org_id: int, 
+        org_id: str, 
         page: int = 1, 
         limit: int = 20,
         search: Optional[str] = None,
@@ -277,8 +285,7 @@ class UserService:
             if search:
                 search_filter = or_(
                     User.email.ilike(f"%{search}%"),
-                    User.username.ilike(f"%{search}%"),
-                    User.full_name.ilike(f"%{search}%")
+                    User.username.ilike(f"%{search}%")
                 )
                 query = query.filter(search_filter)
             
@@ -295,10 +302,13 @@ class UserService:
             # 응답 데이터 구성
             user_list = [
                 UserResponse(
-                    id=user.id,
+                    id=user.user_id,
+                    user_id=user.user_id,
                     user_uuid=user.user_uuid,
                     email=user.email,
                     username=user.username,
+                    org_id=user.org_id,
+                    role=user.role,
                     is_active=user.is_active,
                     created_at=user.created_at,
                     updated_at=user.updated_at
@@ -326,8 +336,8 @@ class UserService:
 
     async def update_user(
         self, 
-        org_id: int, 
-        user_id: int, 
+        org_id: str, 
+        user_id: str, 
         update_data: Dict[str, Any]
     ) -> Optional[UserResponse]:
         """
@@ -345,7 +355,7 @@ class UserService:
             user = self.db.query(User).filter(
                 and_(
                     User.org_id == org_id,
-                    User.id == user_id
+                    User.user_id == user_id
                 )
             ).first()
             
@@ -370,10 +380,13 @@ class UserService:
             logger.info(f"✅ 사용자 업데이트 완료: {user.email}")
             
             return UserResponse(
-                id=user.id,
+                id=user.user_id,
+                user_id=user.user_id,
                 user_uuid=user.user_uuid,
                 email=user.email,
                 username=user.username,
+                org_id=user.org_id,
+                role=user.role,
                 is_active=user.is_active,
                 created_at=user.created_at,
                 updated_at=user.updated_at
@@ -390,7 +403,7 @@ class UserService:
                 detail=f"사용자 업데이트 중 오류가 발생했습니다: {str(e)}"
             )
 
-    async def delete_user(self, org_id: int, user_id: int) -> bool:
+    async def delete_user(self, org_id: str, user_id: str) -> bool:
         """
         조직 내 사용자를 삭제합니다 (소프트 삭제).
         
@@ -405,7 +418,7 @@ class UserService:
             user = self.db.query(User).filter(
                 and_(
                     User.org_id == org_id,
-                    User.id == user_id
+                    User.user_id == user_id
                 )
             ).first()
             
@@ -449,7 +462,7 @@ class UserService:
 
     async def authenticate_user(
         self, 
-        org_id: int, 
+        org_id: str, 
         email: str, 
         password: str
     ):
@@ -494,8 +507,8 @@ class UserService:
 
     async def change_password(
         self, 
-        org_id: int, 
-        user_id: int, 
+        org_id: str, 
+        user_id: str, 
         current_password: str, 
         new_password: str
     ) -> bool:
@@ -515,7 +528,7 @@ class UserService:
             user = self.db.query(User).filter(
                 and_(
                     User.org_id == org_id,
-                    User.id == user_id
+                    User.user_id == user_id
                 )
             ).first()
             
@@ -565,7 +578,7 @@ class UserService:
                 detail=f"비밀번호 변경 중 오류가 발생했습니다: {str(e)}"
             )
 
-    async def get_user_stats(self, org_id: int) -> Dict[str, Any]:
+    async def get_user_stats(self, org_id: str) -> Dict[str, Any]:
         """
         조직의 사용자 통계를 조회합니다.
         
@@ -590,10 +603,10 @@ class UserService:
             ).scalar()
             
             # 관리자 수
-            admin_users = self.db.query(func.count(User.id)).filter(
+            admin_users = self.db.query(func.count(User.user_id)).filter(
                 and_(
                     User.org_id == org_id,
-                    User.is_admin == True,
+                    User.role == "admin",
                     User.is_active == True
                 )
             ).scalar()
@@ -627,8 +640,8 @@ class UserService:
 
     async def _create_mail_user(
         self, 
-        user_id: int, 
-        org_id: int, 
+        user_id: str, 
+        org_id: str, 
         email: str, 
         password_hash: str
     ):
@@ -645,7 +658,7 @@ class UserService:
             생성된 메일 사용자
         """
         # 사용자 정보 조회
-        user = self.db.query(User).filter(User.id == user_id).first()
+        user = self.db.query(User).filter(User.user_id == user_id).first()
         if not user:
             raise ValueError("사용자를 찾을 수 없습니다.")
         
@@ -655,15 +668,13 @@ class UserService:
             user_uuid=user.user_uuid,
             email=email,
             password_hash=password_hash,
-            quota_mb=settings.DEFAULT_MAIL_QUOTA_MB,
-            used_mb=0,
+            display_name=user.username,  # 사용자명을 표시 이름으로 사용
             is_active=True,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc)
+            storage_used_mb=0  # 사용 중인 저장 용량 초기화
         )
         
         self.db.add(mail_user)
         self.db.flush()
         
-        logger.info(f"✅ 메일 사용자 생성: {email} (ID: {mail_user.id})")
+        logger.info(f"✅ 메일 사용자 생성: {email} (ID: {mail_user.user_id})")
         return mail_user

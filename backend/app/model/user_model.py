@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Text, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from ..database.base import Base
+from ..database.user import Base
 import uuid
 
 class User(Base):
@@ -40,7 +40,7 @@ class User(Base):
 class RefreshToken(Base):
     """리프레시 토큰 모델"""
     __tablename__ = "refresh_tokens"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     user_uuid = Column(String(36), ForeignKey("users.user_uuid"), nullable=False)
     token = Column(String(255), unique=True, index=True, nullable=False)

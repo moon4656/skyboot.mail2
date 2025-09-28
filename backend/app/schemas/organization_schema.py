@@ -6,6 +6,7 @@ SaaS 다중 조직 지원을 위한 데이터 검증 및 직렬화 스키마
 from typing import Optional, Dict, Any, List
 from datetime import datetime
 from pydantic import BaseModel, Field, validator, EmailStr
+import uuid
 
 
 class OrganizationBase(BaseModel):
@@ -77,7 +78,32 @@ class OrganizationBase(BaseModel):
 
 class OrganizationCreate(OrganizationBase):
     """조직 생성 스키마"""
-    pass
+    org_code: str = Field(..., min_length=2, max_length=50, description="조직 코드 (subdomain용)")
+    subdomain: str = Field(..., min_length=2, max_length=50, description="서브도메인")
+    
+    @validator('org_code')
+    def validate_org_code(cls, v):
+        """조직 코드 검증"""
+        if not v or len(v.strip()) == 0:
+            raise ValueError('조직 코드는 필수입니다.')
+        # 영문자, 숫자, 하이픈만 허용
+        import re
+        if not re.match(r'^[a-zA-Z0-9-]+$', v):
+            raise ValueError('조직 코드는 영문자, 숫자, 하이픈만 사용할 수 있습니다.')
+        return v
+    
+    @validator('subdomain')
+    def validate_subdomain(cls, v):
+        """서브도메인 검증"""
+        if not v or len(v.strip()) == 0:
+            raise ValueError('서브도메인은 필수입니다.')
+        # 영문자, 숫자, 하이픈만 허용 (DNS 규칙)
+        import re
+        if not re.match(r'^[a-zA-Z0-9-]+$', v):
+            raise ValueError('서브도메인은 영문자, 숫자, 하이픈만 사용할 수 있습니다.')
+        if v.startswith('-') or v.endswith('-'):
+            raise ValueError('서브도메인은 하이픈으로 시작하거나 끝날 수 없습니다.')
+        return v.lower()
 
 
 class OrganizationUpdate(BaseModel):
@@ -126,8 +152,10 @@ class OrganizationUpdate(BaseModel):
 
 class OrganizationResponse(OrganizationBase):
     """조직 응답 스키마"""
-    id: int = Field(..., description="조직 ID")
-    org_uuid: str = Field(..., description="조직 UUID")
+    org_id: str = Field(..., description="조직 ID")
+    org_code: str = Field(..., description="조직 코드")
+    subdomain: str = Field(..., description="서브도메인")
+    admin_email: str = Field(..., description="관리자 이메일")
     is_active: bool = Field(..., description="활성 상태")
     created_at: datetime = Field(..., description="생성 시간")
     updated_at: datetime = Field(..., description="수정 시간")
@@ -192,7 +220,7 @@ class OrganizationSettings(BaseModel):
 
 class OrganizationStats(BaseModel):
     """조직 통계 스키마"""
-    org_id: int = Field(..., description="조직 ID")
+    org_id: str = Field(..., description="조직 ID")
     total_users: int = Field(..., description="총 사용자 수")
     active_users: int = Field(..., description="활성 사용자 수")
     mail_users: int = Field(..., description="메일 사용자 수")
