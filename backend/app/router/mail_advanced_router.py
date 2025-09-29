@@ -365,7 +365,7 @@ async def move_mail_to_folder(
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_email == mail_user.email
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first() is not None
         
@@ -460,7 +460,7 @@ async def backup_mails(
                     Mail.sender_uuid == mail_user.user_uuid,
                     Mail.mail_uuid.in_(
                         db.query(MailRecipient.mail_uuid).filter(
-                            MailRecipient.recipient_email == mail_user.email
+                            MailRecipient.recipient_uuid == mail_user.user_uuid
                         )
                     )
                 )
@@ -764,7 +764,7 @@ async def get_mail_analytics(
             MailRecipient, Mail.mail_uuid == MailRecipient.mail_uuid
         ).filter(
             and_(
-                MailRecipient.recipient_email == mail_user.email,
+                MailRecipient.recipient_uuid == mail_user.user_uuid,
                 Mail.org_id == current_org_id,
                 Mail.created_at >= start_date
             )

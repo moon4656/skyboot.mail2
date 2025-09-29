@@ -117,34 +117,55 @@ class MailService:
             
             # TO 수신자
             for email in to_emails:
-                recipient = MailRecipient(
-                    mail_uuid=mail_uuid,
-                    recipient_email=email,
-                    recipient_type=RecipientType.TO.value
-                )
-                self.db.add(recipient)
+                # 이메일로 사용자 UUID 찾기
+                mail_user = self.db.query(MailUser).filter(
+                    MailUser.email == email,
+                    MailUser.org_id == org_id
+                ).first()
+                
+                if mail_user:
+                    recipient = MailRecipient(
+                        mail_uuid=mail_uuid,
+                        recipient_uuid=mail_user.user_uuid,
+                        recipient_type=RecipientType.TO.value
+                    )
+                    self.db.add(recipient)
                 all_recipients.append(email)
             
             # CC 수신자
             if cc_emails:
                 for email in cc_emails:
-                    recipient = MailRecipient(
-                        mail_uuid=mail_uuid,
-                        recipient_email=email,
-                        recipient_type=RecipientType.CC.value
-                    )
-                    self.db.add(recipient)
+                    # 이메일로 사용자 UUID 찾기
+                    mail_user = self.db.query(MailUser).filter(
+                        MailUser.email == email,
+                        MailUser.org_id == org_id
+                    ).first()
+                    
+                    if mail_user:
+                        recipient = MailRecipient(
+                            mail_uuid=mail_uuid,
+                            recipient_uuid=mail_user.user_uuid,
+                            recipient_type=RecipientType.CC.value
+                        )
+                        self.db.add(recipient)
                     all_recipients.append(email)
             
             # BCC 수신자
             if bcc_emails:
                 for email in bcc_emails:
-                    recipient = MailRecipient(
-                        mail_uuid=mail_uuid,
-                        recipient_email=email,
-                        recipient_type=RecipientType.BCC.value
-                    )
-                    self.db.add(recipient)
+                    # 이메일로 사용자 UUID 찾기
+                    mail_user = self.db.query(MailUser).filter(
+                        MailUser.email == email,
+                        MailUser.org_id == org_id
+                    ).first()
+                    
+                    if mail_user:
+                        recipient = MailRecipient(
+                            mail_uuid=mail_uuid,
+                            recipient_uuid=mail_user.user_uuid,
+                            recipient_type=RecipientType.BCC.value
+                        )
+                        self.db.add(recipient)
                     all_recipients.append(email)
             
             # 첨부파일 정보 저장
