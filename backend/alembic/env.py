@@ -34,8 +34,10 @@ if config.config_file_name is not None:
 # 메타데이터 설정 (모든 모델 포함)
 target_metadata = Base.metadata
 
-# 데이터베이스 URL 설정
-config.set_main_option("sqlalchemy.url", settings.get_database_url())
+# 데이터베이스 URL 설정 (환경 변수에서 직접 가져오기)
+import os
+database_url = os.getenv("DATABASE_URL", "postgresql://postgres:safe70!!@localhost:5432/skybootmail")
+config.set_main_option("sqlalchemy.url", database_url)
 
 def run_migrations_offline() -> None:
     """

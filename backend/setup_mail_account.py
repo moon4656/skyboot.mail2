@@ -135,8 +135,8 @@ def main():
     print("=" * 50)
     
     # 테스트 사용자 정보
-    email = "user@skyboot.com"
-    password = "password123"
+    email = "admin@skyboot.kr"
+    password = "admin123"
     
     # 1. 로그인
     access_token = login_user(email, password)

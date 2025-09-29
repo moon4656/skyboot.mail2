@@ -79,15 +79,17 @@ def drop_tables():
         logger.error(f"❌ 테이블 삭제 중 오류 발생: {e}")
         raise
 
-def init_default_folders(db, user_uuid: str):
+def init_default_folders(db, user_uuid: str, org_id: str):
     """
     사용자의 기본 폴더들을 생성합니다.
     
     Args:
         db: 데이터베이스 세션
         user_uuid: 사용자 UUID
+        org_id: 조직 ID
     """
     from ..model.mail_model import MailFolder, FolderType
+    import uuid
     
     default_folders = [
         {"name": "받은편지함", "folder_type": FolderType.INBOX.value, "is_system": True},
@@ -101,12 +103,15 @@ def init_default_folders(db, user_uuid: str):
             # 이미 존재하는지 확인
             existing_folder = db.query(MailFolder).filter(
                 MailFolder.user_uuid == user_uuid,
+                MailFolder.org_id == org_id,
                 MailFolder.folder_type == folder_data["folder_type"]
             ).first()
             
             if not existing_folder:
                 folder = MailFolder(
+                    folder_uuid=str(uuid.uuid4()),
                     user_uuid=user_uuid,
+                    org_id=org_id,
                     name=folder_data["name"],
                     folder_type=folder_data["folder_type"],
                     is_system=folder_data["is_system"]

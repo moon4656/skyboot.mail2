@@ -437,7 +437,7 @@ class MailService:
             메일 상세 정보
         """
         try:
-            logger.info(f"📧 메일 상세 조회 - 조직 ID: {org_id}, 사용자 ID: {user_id}, 메일 ID: {mail_id}")
+            logger.info(f"📧 메일 상세 조회 - 조직 ID: {org_id}, 사용자 ID: {user_uuid}, 메일 UUID: {mail_uuid}")
             
             # 사용자 검증
             user = self.db.query(User).filter(
@@ -546,7 +546,7 @@ class MailService:
             삭제 성공 여부
         """
         try:
-            logger.info(f"🗑️ 메일 삭제 - 조직 ID: {org_id}, 사용자 ID: {user_id}, 메일 ID: {mail_id}, 영구삭제: {permanent}")
+            logger.info(f"🗑️ 메일 삭제 - 조직 ID: {org_id}, 사용자 UUID: {user_uuid}, 메일 UUID: {mail_uuid}, 영구삭제: {permanent}")
             
             # 사용자 검증
             user = self.db.query(User).filter(

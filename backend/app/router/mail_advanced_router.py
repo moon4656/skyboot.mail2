@@ -116,8 +116,13 @@ async def create_folder(
         if existing_folder:
             raise HTTPException(status_code=400, detail="폴더명이 이미 존재합니다")
         
+        # UUID 생성
+        import uuid
+        folder_uuid = str(uuid.uuid4())
+        
         # 새 폴더 생성 (조직 ID 추가)
         new_folder = MailFolder(
+            folder_uuid=folder_uuid,
             user_uuid=mail_user.user_uuid,
             org_id=current_org_id,
             name=folder_data.get('name'),
@@ -128,10 +133,11 @@ async def create_folder(
         db.commit()
         db.refresh(new_folder)
         
-        logger.info(f"✅ create_folder 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {new_folder.name}, 폴더 ID: {new_folder.id}")
+        logger.info(f"✅ create_folder 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {new_folder.name}, 폴더 UUID: {new_folder.folder_uuid}")
         
         return {
             "id": new_folder.id,
+            "folder_uuid": new_folder.folder_uuid,
             "name": new_folder.name,
             "folder_type": new_folder.folder_type,
             "mail_count": 0,
@@ -359,7 +365,7 @@ async def move_mail_to_folder(
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_uuid == mail_user.user_uuid
+                MailRecipient.recipient_email == mail_user.email
             )
         ).first() is not None
         
@@ -452,9 +458,9 @@ async def backup_mails(
                 Mail.org_id == current_org_id,
                 or_(
                     Mail.sender_uuid == mail_user.user_uuid,
-                    Mail.id.in_(
+                    Mail.mail_uuid.in_(
                         db.query(MailRecipient.mail_uuid).filter(
-                            MailRecipient.recipient_uuid == mail_user.user_uuid
+                            MailRecipient.recipient_email == mail_user.email
                         )
                     )
                 )
@@ -486,7 +492,7 @@ async def backup_mails(
                 recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
                 
                 # 첨부파일 정보
-                attachments = db.query(MailAttachment).filter(MailAttachment.mail_id == mail.mail_uuid).all()
+                attachments = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).all()
                 
                 mail_info = {
                     "id": mail.mail_uuid,
@@ -495,9 +501,9 @@ async def backup_mails(
                     "sender_email": sender.email if sender else None,
                     "recipients": [
                         {
-                            "email": r.recipient.email,
+                            "email": r.recipient_email,
                             "type": r.recipient_type,
-                            "name": r.recipient.email  # MailUser 모델에 name 필드가 없으므로 email 사용
+                            "name": r.recipient_email  # MailUser 모델에 name 필드가 없으므로 email 사용
                         } for r in recipients
                     ],
                     "status": mail.status,
@@ -758,7 +764,7 @@ async def get_mail_analytics(
             MailRecipient, Mail.mail_uuid == MailRecipient.mail_uuid
         ).filter(
             and_(
-                MailRecipient.recipient_uuid == mail_user.user_uuid,
+                MailRecipient.recipient_email == mail_user.email,
                 Mail.org_id == current_org_id,
                 Mail.created_at >= start_date
             )
@@ -811,9 +817,9 @@ async def get_mail_analytics(
                 sender_stats[sender_email] = sender_stats.get(sender_email, 0) + 1
         
         for mail in sent_mails:
-            recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.id).all()
+            recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
             for recipient in recipients:
-                recipient_email = recipient.email
+                recipient_email = recipient.recipient_email
                 recipient_stats[recipient_email] = recipient_stats.get(recipient_email, 0) + 1
         
         # 상위 5개만 선택

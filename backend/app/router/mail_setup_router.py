@@ -34,7 +34,7 @@ async def setup_mail_account(
             folder_count = db.query(MailFolder).filter(MailFolder.user_uuid == existing_mail_user.user_uuid).count()
             if folder_count == 0:
                 logger.info(f"기존 메일 사용자 {existing_mail_user.email}의 기본 폴더 생성")
-                init_default_folders(db, existing_mail_user.user_uuid)
+                init_default_folders(db, existing_mail_user.user_uuid, existing_mail_user.org_id)
             
             return {
                 "success": True,
@@ -49,6 +49,7 @@ async def setup_mail_account(
         # 새 메일 사용자 생성
         mail_user = MailUser(
             user_id=str(current_user.user_uuid),
+            user_uuid=current_user.user_uuid,  # User의 user_uuid를 사용
             org_id=current_user.org_id,
             email=current_user.email,
             password_hash=current_user.hashed_password,  # User의 해시된 비밀번호 사용
@@ -63,7 +64,7 @@ async def setup_mail_account(
         logger.info(f"새 메일 사용자 생성 완료: {mail_user.email}")
         
         # 기본 폴더 생성
-        init_default_folders(db, mail_user.user_uuid)
+        init_default_folders(db, mail_user.user_uuid, mail_user.org_id)
         
         logger.info(f"사용자 {current_user.email}의 메일 계정 초기화 완료")
         

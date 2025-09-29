@@ -43,7 +43,7 @@ class RefreshToken(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_uuid = Column(String(36), ForeignKey("users.user_uuid"), nullable=False)
-    token = Column(String(255), unique=True, index=True, nullable=False)
+    token = Column(Text, unique=True, index=True, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     is_revoked = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -61,7 +61,6 @@ class MailUser(Base):
     # 관계 설정
     organization = relationship("Organization", back_populates="mail_users")
     sent_mails = relationship("Mail", foreign_keys="Mail.sender_uuid", back_populates="sender")
-    received_mails = relationship("MailRecipient", back_populates="recipient")
     folders = relationship("MailFolder", back_populates="user")
     mail_logs = relationship("MailLog", back_populates="user")
     
@@ -69,7 +68,7 @@ class MailUser(Base):
         UniqueConstraint('org_id', 'email', name='unique_org_mail_email'),
     )
 
-def generate_mail_id() -> str:
+def generate_mail_uuid() -> str:
     """메일 ID 생성 (년월일_시분초_uuid 형태)"""
     from datetime import datetime
     import uuid
@@ -83,9 +82,7 @@ class Mail(Base):
     """메일 모델 - 조직 연결"""
     __tablename__ = "mails"
     
-    id = Column(BigInteger, primary_key=True, index=True)
-    mail_uuid = Column(String(50), unique=True, nullable=False, comment="메일 고유 UUID")
-    mail_id = Column(String(50), comment="메일 ID")
+    mail_uuid = Column(String(50), primary_key=True, index=True, comment="메일 고유 UUID")
     org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="조직 ID")
     sender_uuid = Column(String(36), ForeignKey("mail_users.user_uuid"), nullable=False, comment="발송자 UUID")
     subject = Column(String(255), nullable=False, comment="메일 제목")
@@ -115,51 +112,25 @@ class MailRecipient(Base):
     
     id = Column(BigInteger, primary_key=True, index=True)
     mail_uuid = Column(String(50), ForeignKey("mails.mail_uuid"), nullable=False, comment="메일 UUID (mails.mail_uuid 참조)")
-    recipient_uuid = Column(String(36), ForeignKey("mail_users.user_uuid"), nullable=False, comment="수신자 UUID (mail_users.user_uuid 참조)")
-    recipient_type = Column(SQLEnum(RecipientType), default=RecipientType.TO, comment="수신자 타입")
-    is_read = Column(Boolean, default=False, comment="읽음 여부")
-    read_at = Column(DateTime, comment="읽은 시간")
-    is_deleted = Column(Boolean, default=False, comment="삭제 여부")
-    deleted_at = Column(DateTime, comment="삭제 시간")
+    recipient_email = Column(String(255), nullable=False, comment="수신자 이메일 주소")
+    recipient_type = Column(String(10), default=RecipientType.TO.value, comment="수신자 타입")
     created_at = Column(DateTime, server_default=func.now(), comment="생성 시간")
-    
-    # mail_id 속성 추가 (mail_uuid와 동일한 값)
-    @property
-    def mail_id(self):
-        """mail_uuid와 동일한 값을 반환하는 mail_id 속성"""
-        return self.mail_uuid
-    
-    # recipient_email 속성 추가 (관련 MailUser의 이메일 반환)
-    @property
-    def recipient_email(self):
-        """관련 MailUser의 이메일을 반환하는 recipient_email 속성"""
-        if self.recipient:
-            return self.recipient.email
-        return None
     
     # 관계 설정
     mail = relationship("Mail", back_populates="recipients")
-    recipient = relationship("MailUser", back_populates="received_mails")
 
 class MailAttachment(Base):
     """메일 첨부파일 모델"""
     __tablename__ = "mail_attachments"
     
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    attachment_uuid = Column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()), comment="첨부파일 UUID")
+    id = Column(BigInteger, primary_key=True, index=True)
+    attachment_uuid = Column(String(255), unique=True, nullable=False, comment="첨부파일 UUID")
     mail_uuid = Column(String(50), ForeignKey("mails.mail_uuid"), nullable=False, comment="메일 UUID (mails.mail_uuid 참조)")
     filename = Column(String(255), nullable=False, comment="파일명")
-    original_filename = Column(String(255), nullable=False, comment="원본 파일명")
-    file_path = Column(String(500), nullable=False, comment="파일 경로")
-    file_size = Column(Integer, nullable=False, comment="파일 크기")
-    content_type = Column(String(100), comment="콘텐츠 타입")
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="생성 시간")
-    
-    # mail_id 속성 추가 (mail_uuid와 동일한 값)
-    @property
-    def mail_id(self):
-        """mail_uuid와 동일한 값을 반환하는 mail_id 속성"""
-        return self.mail_uuid
+    file_path = Column(String(500), nullable=False, comment="파일 저장 경로")
+    file_size = Column(BigInteger, nullable=False, comment="파일 크기 (bytes)")
+    content_type = Column(String(100), comment="MIME 타입")
+    created_at = Column(DateTime, server_default=func.now(), comment="생성 시간")
     
     # 관계 설정
     mail = relationship("Mail", back_populates="attachments")
@@ -171,6 +142,7 @@ class MailFolder(Base):
     id = Column(Integer, primary_key=True, index=True, comment="폴더 ID")
     folder_uuid = Column(String(36), unique=True, comment="폴더 UUID")
     user_uuid = Column(String(36), ForeignKey("mail_users.user_uuid"), nullable=False, index=True, comment="사용자 UUID")
+    org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="조직 ID")
     name = Column(String(100), nullable=False, comment="폴더명")
     folder_type = Column(SQLEnum(FolderType, values_callable=lambda x: [e.value for e in x]), default=FolderType.CUSTOM, comment="폴더 타입")
     parent_id = Column(Integer, ForeignKey("mail_folders.id"), comment="상위 폴더 ID")

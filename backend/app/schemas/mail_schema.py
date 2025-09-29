@@ -42,7 +42,6 @@ class MailUserCreate(MailUserBase):
 
 class MailUserResponse(MailUserBase):
     """메일 사용자 응답 스키마"""
-    user_id: str
     user_uuid: str
     created_at: datetime
     updated_at: datetime
@@ -72,7 +71,7 @@ class AttachmentResponse(AttachmentBase):
 class RecipientBase(BaseModel):
     """수신자 기본 스키마"""
     email: EmailStr = Field(..., description="수신자 이메일")
-    recipient_type: RecipientType = Field(RecipientType.TO, description="수신자 타입")
+    recipient_type: RecipientType = Field(RecipientType.TO.value, description="수신자 타입")
 
 class RecipientResponse(BaseModel):
     """수신자 응답 스키마"""
@@ -130,7 +129,6 @@ class MailDetailResponse(MailResponse):
 
 class MailListResponse(BaseModel):
     """메일 목록 응답 스키마"""
-    id: int
     mail_uuid: str
     subject: str
     status: MailStatus
@@ -138,7 +136,7 @@ class MailListResponse(BaseModel):
     priority: MailPriority
     sent_at: Optional[datetime]
     created_at: datetime
-    sender_uuid: MailUserResponse
+    sender: Optional[MailUserResponse]
     recipient_count: int
     attachment_count: int
     is_read: Optional[bool] = None  # 받은 메일의 경우에만 사용

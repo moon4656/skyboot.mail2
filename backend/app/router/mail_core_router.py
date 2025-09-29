@@ -122,11 +122,17 @@ async def send_mail(
                         db.add(recipient_user)
                         db.flush()
                     
+                    recipient_type_value = RecipientType.TO.value
+                    logger.info(f"🔍 DEBUG: RecipientType.TO.value = {recipient_type_value}")
+                    logger.info(f"🔍 DEBUG: type(recipient_type_value) = {type(recipient_type_value)}")
+                    
                     recipient = MailRecipient(
                         mail_uuid=mail.mail_uuid,
-                        recipient_uuid=recipient_user.user_uuid,
-                        recipient_type=RecipientType.TO
+                        recipient_email=email,
+                        recipient_type=recipient_type_value
                     )
+                    logger.info(f"🔍 DEBUG: recipient.recipient_type = {recipient.recipient_type}")
+                    logger.info(f"🔍 DEBUG: type(recipient.recipient_type) = {type(recipient.recipient_type)}")
                     recipients.append(recipient)
                     db.add(recipient)
         
@@ -155,9 +161,9 @@ async def send_mail(
                         db.flush()
                     
                     recipient = MailRecipient(
-                        mail_uuid=mail.id,
-                        recipient_uuid=recipient_user.user_uuid,
-                        recipient_type=RecipientType.CC
+                        mail_uuid=mail.mail_uuid,
+                        recipient_email=email,
+                        recipient_type=RecipientType.CC.value
                     )
                     recipients.append(recipient)
                     db.add(recipient)
@@ -189,8 +195,8 @@ async def send_mail(
                     
                     recipient = MailRecipient(
                         mail_uuid=mail.mail_uuid,
-                        recipient_uuid=recipient_user.user_uuid,
-                        recipient_type=RecipientType.BCC
+                        recipient_email=email,
+                        recipient_type=RecipientType.BCC.value
                     )
                     recipients.append(recipient)
                     db.add(recipient)
@@ -211,7 +217,7 @@ async def send_mail(
                     
                     # 첨부파일 정보 저장
                     mail_attachment = MailAttachment(
-                        id=file_id,
+                        attachment_uuid=file_id,
                         mail_uuid=mail.mail_uuid,
                         filename=attachment.filename,
                         file_path=file_path,
@@ -270,6 +276,7 @@ async def get_inbox_mails(
         inbox_folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.user_uuid == mail_user.user_uuid,
+                MailFolder.org_id == current_org_id,
                 MailFolder.folder_type == FolderType.INBOX
             )
         ).first()
@@ -321,13 +328,15 @@ async def get_inbox_mails(
             
             # 수신자 정보
             recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-            to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
+            to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
+            cc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.CC]
+            bcc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.BCC]
             
             # 현재 사용자의 read_at 정보 조회
             current_recipient = db.query(MailRecipient).filter(
                 and_(
                     MailRecipient.mail_uuid == mail.mail_uuid,
-                    MailRecipient.recipient_uuid == mail_user.user_uuid
+                    MailRecipient.recipient_email == mail_user.email
                 )
             ).first()
             
@@ -412,9 +421,9 @@ async def get_inbox_mail_detail(
         
         # 수신자 정보
         recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-        to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
-        cc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.CC]
-        bcc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.BCC]
+        to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
+        cc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.CC]
+        bcc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.BCC]
         
         # 첨부파일 정보
         attachments = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).all()
@@ -437,7 +446,7 @@ async def get_inbox_mail_detail(
         
         current_recipient = db.query(MailRecipient).filter(
             MailRecipient.mail_uuid == mail.mail_uuid,  
-            MailRecipient.recipient_uuid == mail_user.user_uuid
+            MailRecipient.recipient_email == mail_user.email
         ).first()
         
         read_at = None
@@ -528,7 +537,7 @@ async def get_sent_mails(
         for mail in mails:
             # 수신자 정보
             recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-            to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
+            to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
             
             # 첨부파일 개수
             attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).count()
@@ -617,9 +626,9 @@ async def get_sent_mail_detail(
         
         # 수신자 정보
         recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-        to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
-        cc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.CC]
-        bcc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.BCC]
+        to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
+        cc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.CC]
+        bcc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.BCC]
         
         # 첨부파일 정보
         attachments = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).all()
@@ -713,7 +722,7 @@ async def get_draft_mails(
         for mail in mails:
             # 수신자 정보
             recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-            to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
+            to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
             
             # 첨부파일 개수
             attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).count()
@@ -777,9 +786,9 @@ async def get_draft_mail_detail(
         
         # 수신자 정보
         recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()    
-        to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
-        cc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.CC]
-        bcc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.BCC]
+        to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
+        cc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.CC]
+        bcc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.BCC]
         
         # 첨부파일 정보
         attachments = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).all()
@@ -844,6 +853,7 @@ async def get_deleted_mails(
         trash_folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.user_uuid == mail_user.user_uuid,
+                MailFolder.org_id == current_org_id,
                 MailFolder.folder_type == FolderType.TRASH
             )
         ).first()
@@ -889,7 +899,7 @@ async def get_deleted_mails(
             
             # 수신자 정보
             recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()    
-            to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
+            to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
             
             # 첨부파일 개수
             attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).count()
@@ -1034,8 +1044,8 @@ async def download_attachment(
             logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
             raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        # 첨부파일 조회
-        attachment = db.query(MailAttachment).filter(MailAttachment.id == attachment_id).first()
+        # 첨부파일 조회 (attachment_uuid 사용)
+        attachment = db.query(MailAttachment).filter(MailAttachment.attachment_uuid == attachment_id).first()
         if not attachment:
             logger.warning(f"⚠️ 첨부파일을 찾을 수 없음 - 첨부파일ID: {attachment_id}")
             raise HTTPException(status_code=404, detail="첨부파일을 찾을 수 없습니다")
@@ -1057,7 +1067,7 @@ async def download_attachment(
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_uuid == mail_user.user_uuid
+                MailRecipient.recipient_email == mail_user.email
             )
         ).first() is not None
         

@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 # 프로젝트 루트 디렉토리를 Python 경로에 추가
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.database.base import get_db
-from app.model.base_model import User
+from app.database.user import get_db
+from app.model.user_model import User
+from app.model.organization_model import Organization
 from app.service.auth_service import get_password_hash
 
 def create_test_users():
@@ -23,13 +24,36 @@ def create_test_users():
     db = next(get_db())
     
     try:
+        # 테스트 조직 생성 또는 확인
+        test_org_id = "test-org-001"
+        existing_org = db.query(Organization).filter(Organization.org_id == test_org_id).first()
+        
+        if not existing_org:
+            test_org = Organization(
+                org_id=test_org_id,
+                org_code="testorg001",
+                name="테스트 조직",
+                domain="test.example.com",
+                subdomain="testorg",
+                admin_email="admin@test.example.com",
+                max_users=100,
+                is_active=True
+            )
+            db.add(test_org)
+            db.commit()
+            print(f"✅ 테스트 조직 {test_org_id}를 생성했습니다.")
+        else:
+            print(f"✅ 테스트 조직 {test_org_id}는 이미 존재합니다.")
+        
         test_users = [
             {
+                "user_id": "testuser1",
                 "email": "testuser1@example.com",
                 "username": "testuser1",
                 "password": "testpassword123"
             },
             {
+                "user_id": "testuser2",
                 "email": "testuser2@example.com", 
                 "username": "testuser2",
                 "password": "testpassword123"
@@ -49,6 +73,8 @@ def create_test_users():
             else:
                 # 새 사용자 생성
                 new_user = User(
+                    user_id=user_data["user_id"],
+                    org_id=test_org_id,
                     email=user_data["email"],
                     username=user_data["username"],
                     hashed_password=get_password_hash(user_data["password"]),
