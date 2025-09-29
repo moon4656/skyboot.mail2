@@ -1,7 +1,13 @@
-# 기업용 메일서버 프로젝트 규칙 (Project Rules)
+# SkyBoot Mail SaaS 프로젝트 규칙 (Project Rules)
 
 ## 🎯 프로젝트 개요
-이 문서는 기업용 메일서버 프로젝트의 개발 규칙과 가이드라인을 정의합니다. 모든 개발자는 이 규칙을 준수하여 일관성 있고 고품질의 코드를 작성해야 합니다.
+이 문서는 SkyBoot Mail SaaS 기반 다중 조직 지원 메일서버 프로젝트의 개발 규칙과 가이드라인을 정의합니다. 모든 개발자는 이 규칙을 준수하여 일관성 있고 고품질의 코드를 작성해야 합니다.
+
+**프로젝트 특징:**
+- SaaS 기반 다중 조직(Multi-tenant) 지원
+- 기업용 메일 서버 시스템
+- 확장 가능한 마이크로서비스 아키텍처
+- 실시간 모니터링 및 로깅
 
 ---
 
@@ -9,47 +15,89 @@
 
 ### 기술 스택
 - **백엔드**: Python 3.11+, FastAPI, SQLAlchemy, PostgreSQL
-- **프론트엔드**: Vue.js 3, TypeScript, Vite, Pinia
+- **프론트엔드**: Vue.js 3, TypeScript, Vite, Pinia, Vuestic UI
 - **메일 서버**: Postfix (SMTP), Dovecot (IMAP/POP3)
 - **캐시/세션**: Redis
-- **인증**: JWT 토큰, bcrypt 패스워드 해싱
+- **백그라운드 작업**: Celery, APScheduler, RQ
+- **인증**: JWT 토큰 (python-jose), bcrypt 패스워드 해싱
 - **데이터베이스**: PostgreSQL 15+ with Alembic 마이그레이션
 - **컨테이너화**: Docker, Docker Compose
 - **웹서버**: Nginx (프록시 및 정적 파일 서빙)
-- **로깅**: Python logging 모듈
+- **로깅**: Python logging, structlog
+- **모니터링**: Prometheus
+- **파일 저장**: boto3 (AWS S3 호환)
 - **테스트**: pytest 프레임워크
+- **속도 제한**: slowapi, python-limits
 
 ### 프로젝트 구조
 ```
 skyboot.mail2/
-├── backend/                 # FastAPI 백엔드 서버
+├── backend/                    # FastAPI 백엔드 서버
 │   ├── app/
-│   │   ├── routers/        # API 라우터
-│   │   ├── models.py       # 데이터베이스 모델
-│   │   ├── schemas.py      # Pydantic 스키마
-│   │   ├── auth.py         # 인증 및 권한 관리
-│   │   ├── config.py       # 설정 관리
-│   │   ├── database.py     # 데이터베이스 연결
-│   │   └── mail_service.py # 메일 발송 서비스
-│   ├── main.py             # FastAPI 앱 진입점
-│   ├── requirements.txt    # Python 의존성
-│   ├── init.sql           # 데이터베이스 초기화
-│   └── test_mail.py       # 메일 발송 테스트
-├── frontend/               # Vue.js 프론트엔드
+│   │   ├── router/            # API 라우터 (실제 구조)
+│   │   │   ├── auth_router.py          # 인증 관련 API
+│   │   │   ├── organization_router.py  # 조직 관리 API
+│   │   │   ├── user_router.py          # 사용자 관리 API
+│   │   │   ├── mail_core_router.py     # 메일 핵심 기능 API
+│   │   │   ├── mail_convenience_router.py # 메일 편의 기능 API
+│   │   │   ├── mail_advanced_router.py # 메일 고급 기능 API
+│   │   │   ├── mail_setup_router.py    # 메일 설정 API
+│   │   │   └── debug_router.py         # 디버그 API (개발용)
+│   │   ├── model/             # 데이터베이스 모델
+│   │   │   ├── user_model.py           # 사용자 모델
+│   │   │   ├── organization_model.py   # 조직 모델
+│   │   │   └── mail_model.py           # 메일 모델
+│   │   ├── schemas/           # Pydantic 스키마
+│   │   │   ├── user_schema.py          # 사용자 스키마
+│   │   │   ├── organization_schema.py  # 조직 스키마
+│   │   │   └── mail_schema.py          # 메일 스키마
+│   │   ├── service/           # 비즈니스 로직 서비스
+│   │   │   ├── auth_service.py         # 인증 서비스
+│   │   │   ├── user_service.py         # 사용자 서비스
+│   │   │   ├── organization_service.py # 조직 서비스
+│   │   │   └── mail_service.py         # 메일 서비스
+│   │   ├── database/          # 데이터베이스 연결
+│   │   │   ├── user.py                 # 사용자 DB 연결
+│   │   │   └── mail.py                 # 메일 DB 연결
+│   │   ├── middleware/        # 미들웨어
+│   │   │   ├── tenant_middleware.py    # 다중 조직 미들웨어
+│   │   │   └── rate_limit_middleware.py # 속도 제한 미들웨어
+│   │   ├── utils/             # 유틸리티 함수
+│   │   ├── config.py          # 설정 관리
+│   │   └── logging_config.py  # 로깅 설정
+│   ├── main.py                # FastAPI 앱 진입점
+│   ├── requirements.txt       # Python 의존성
+│   ├── init.sql              # 데이터베이스 초기화
+│   ├── alembic/              # 데이터베이스 마이그레이션
+│   ├── migration/            # 커스텀 마이그레이션 스크립트
+│   ├── test/                 # 테스트 코드
+│   ├── backups/              # 백업 파일
+│   └── Dockerfile            # Docker 이미지 빌드
+├── frontend/                  # Vue.js 프론트엔드
 │   ├── src/
-│   │   ├── components/     # Vue 컴포넌트
-│   │   ├── views/         # 페이지 컴포넌트
-│   │   ├── router/        # Vue Router 설정
-│   │   ├── stores/        # Pinia 상태 관리
-│   │   └── services/      # API 서비스
-│   ├── package.json       # Node.js 의존성
-│   ├── vite.config.ts     # Vite 설정
-│   └── nginx.conf         # Nginx 설정
-├── docker-compose.yml      # 프로덕션 Docker Compose
-├── docker-compose.dev.yml  # 개발 Docker Compose
-├── postfix_main.cf        # Postfix 메인 설정
-├── postfix_master.cf      # Postfix 마스터 설정
-└── .trae/rules/           # Trae AI IDE 프로젝트 규칙
+│   │   ├── views/            # 페이지 컴포넌트
+│   │   │   ├── Home.vue      # 홈 페이지
+│   │   │   ├── Login.vue     # 로그인 페이지
+│   │   │   ├── Register.vue  # 회원가입 페이지
+│   │   │   └── SendMail.vue  # 메일 발송 페이지
+│   │   ├── router/           # Vue Router 설정
+│   │   ├── stores/           # Pinia 상태 관리
+│   │   ├── services/         # API 서비스
+│   │   ├── App.vue           # 메인 앱 컴포넌트
+│   │   └── main.ts           # 앱 진입점
+│   ├── package.json          # Node.js 의존성
+│   ├── vite.config.ts        # Vite 설정
+│   ├── nginx.conf            # Nginx 설정
+│   └── Dockerfile            # Docker 이미지 빌드
+├── docs/                     # 프로젝트 문서
+├── attachments/              # 첨부파일 저장소
+├── backups/                  # 시스템 백업
+├── docker-compose.yml        # 프로덕션 Docker Compose
+├── docker-compose.dev.yml    # 개발 Docker Compose
+├── postfix_main.cf          # Postfix 메인 설정
+├── postfix_master.cf        # Postfix 마스터 설정
+├── dovecot.conf             # Dovecot 설정
+└── .trae/rules/             # Trae AI IDE 프로젝트 규칙
 ```
 
 ---
@@ -112,31 +160,72 @@ def send_email(recipient: str, subject: str, content: str, sender: str = None) -
 - 필수 필드는 `nullable=False` 설정
 
 ### 주요 테이블 구조
+현재 프로젝트는 다중 조직 지원을 위한 SaaS 구조로 설계되어 있습니다:
+
 ```python
-# 메일 사용자 테이블
-class MailUser(Base):
-    # 메일 시스템 사용자 정보를 저장하는 테이블
+# 조직 모델 (organization_model.py)
+class Organization(Base):
+    """조직 정보를 저장하는 테이블 - SaaS 다중 테넌트 지원"""
+    __tablename__ = "organizations"
+    
+    id = Column(Integer, primary_key=True, comment="조직 고유 ID")
+    org_uuid = Column(String, unique=True, comment="조직 UUID")
+    name = Column(String, nullable=False, comment="조직명")
+    domain = Column(String, unique=True, comment="조직 도메인")
+    max_users = Column(Integer, default=100, comment="최대 사용자 수")
+    is_active = Column(Boolean, default=True, comment="활성화 상태")
+    created_at = Column(DateTime, comment="생성 시간")
+    # ... 기타 필드
+
+# 사용자 모델 (user_model.py)
+class User(Base):
+    """사용자 정보를 저장하는 테이블 - 조직별 분리"""
+    __tablename__ = "users"
+    
     id = Column(Integer, primary_key=True, comment="사용자 고유 ID")
     user_uuid = Column(String, unique=True, comment="사용자 UUID")
     email = Column(String, unique=True, comment="이메일 주소")
     password_hash = Column(String, comment="해시된 비밀번호")
+    organization_id = Column(Integer, ForeignKey("organizations.id"), comment="소속 조직 ID")
+    role = Column(Enum(UserRole), comment="사용자 역할")
+    is_active = Column(Boolean, default=True, comment="활성화 상태")
+    created_at = Column(DateTime, comment="생성 시간")
     # ... 기타 필드
 
-# 메일 테이블
+# 메일 모델 (mail_model.py)
 class Mail(Base):
-    # 메일 정보를 저장하는 테이블
+    """메일 정보를 저장하는 테이블 - 조직별 분리"""
+    __tablename__ = "mails"
+    
     mail_id = Column(String, primary_key=True, comment="메일 고유 ID")
-    sender_email = Column(String, comment="발송자 이메일")
+    sender_id = Column(Integer, ForeignKey("users.id"), comment="발송자 ID")
+    organization_id = Column(Integer, ForeignKey("organizations.id"), comment="조직 ID")
     subject = Column(String, comment="메일 제목")
     content = Column(Text, comment="메일 본문")
     sent_at = Column(DateTime, comment="발송 시간")
+    status = Column(Enum(MailStatus), comment="메일 상태")
+    # ... 기타 필드
+
+# 메일 수신자 테이블
+class MailRecipient(Base):
+    """메일 수신자 정보를 저장하는 테이블"""
+    __tablename__ = "mail_recipients"
+    
+    id = Column(Integer, primary_key=True, comment="수신자 고유 ID")
+    mail_id = Column(String, ForeignKey("mails.mail_id"), comment="메일 ID")
+    recipient_email = Column(String, comment="수신자 이메일")
+    recipient_type = Column(Enum(RecipientType), comment="수신자 타입 (TO, CC, BCC)")
     # ... 기타 필드
 
 # 가상 도메인 테이블 (Postfix 연동)
 class VirtualDomain(Base):
-    # Postfix 가상 도메인 정보를 저장하는 테이블
+    """Postfix 가상 도메인 정보를 저장하는 테이블"""
+    __tablename__ = "virtual_domains"
+    
     id = Column(Integer, primary_key=True, comment="도메인 ID")
+    organization_id = Column(Integer, ForeignKey("organizations.id"), comment="조직 ID")
     name = Column(String, unique=True, comment="도메인명")
+    is_active = Column(Boolean, default=True, comment="활성화 상태")
     # ... 기타 필드
 ```
 
@@ -156,44 +245,81 @@ class VirtualDomain(Base):
 - 일관된 응답 형식 유지
 - 에러 응답에 상세한 한국어 메시지 포함
 
+### API 라우터 구조
+현재 프로젝트는 기능별로 분리된 라우터 구조를 사용합니다:
+
+- **인증 라우터** (`auth_router.py`): 로그인, 회원가입, 토큰 관리
+- **조직 라우터** (`organization_router.py`): 다중 조직 관리, 조직 설정
+- **사용자 라우터** (`user_router.py`): 사용자 관리, 프로필 설정
+- **메일 핵심 라우터** (`mail_core_router.py`): 메일 발송, 수신, 기본 기능
+- **메일 편의 라우터** (`mail_convenience_router.py`): 메일함 관리, 검색
+- **메일 고급 라우터** (`mail_advanced_router.py`): 필터링, 자동화 규칙
+- **메일 설정 라우터** (`mail_setup_router.py`): 메일 서버 설정, 도메인 관리
+- **디버그 라우터** (`debug_router.py`): 개발 환경 전용 디버깅 API
+
 ### 엔드포인트 예시
 ```python
-@app.post("/api/mail/send", summary="메일 발송")
+# 메일 핵심 기능 (mail_core_router.py)
+@router.post("/send", summary="메일 발송")
 async def send_mail(
     mail_data: MailSendRequest,
-    current_user: MailUser = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    organization: Organization = Depends(get_current_organization)
 ):
     """
-    메일을 발송합니다.
+    메일을 발송합니다. (다중 조직 지원)
     
     - **recipient**: 수신자 이메일 주소
     - **subject**: 메일 제목
     - **content**: 메일 본문
     - **attachments**: 첨부파일 (선택사항)
+    - **organization_id**: 조직 ID (자동 설정)
     """
     pass
 
-@app.get("/api/mail/inbox", summary="받은 메일함 조회")
+@router.get("/inbox", summary="받은 메일함 조회")
 async def get_inbox(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    current_user: MailUser = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    organization: Organization = Depends(get_current_organization)
 ):
     """
-    사용자의 받은 메일함을 조회합니다.
+    사용자의 받은 메일함을 조회합니다. (조직별 분리)
     
     - **page**: 페이지 번호 (기본값: 1)
     - **limit**: 페이지당 메일 수 (기본값: 20, 최대: 100)
+    - **organization_id**: 조직 ID (자동 필터링)
+    """
+    pass
+
+# 조직 관리 (organization_router.py)
+@router.post("/", summary="조직 생성")
+async def create_organization(
+    org_data: OrganizationCreateRequest,
+    current_user: User = Depends(get_current_admin_user)
+):
+    """
+    새로운 조직을 생성합니다.
+    
+    - **name**: 조직명
+    - **domain**: 조직 도메인
+    - **max_users**: 최대 사용자 수
+    - **features**: 사용 가능한 기능 목록
     """
     pass
 ```
 
-### 메일 서비스 통합
-- Postfix SMTP 서버 연동
-- Dovecot IMAP/POP3 서버 연동
-- 메일 큐 관리 및 재시도 메커니즘
-- 첨부파일 처리 및 저장
-- 스팸 필터링 및 바이러스 검사
+### SaaS 메일 서비스 통합
+- **다중 조직 지원**: 조직별 메일 도메인 및 사용자 분리
+- **Postfix SMTP 서버 연동**: 조직별 가상 도메인 설정
+- **Dovecot IMAP/POP3 서버 연동**: 조직별 메일박스 분리
+- **백그라운드 작업 처리**: Celery, APScheduler, RQ를 통한 비동기 메일 처리
+- **메일 큐 관리**: 조직별 우선순위 및 재시도 메커니즘
+- **첨부파일 처리**: boto3를 통한 클라우드 저장소 연동
+- **스팸 필터링**: 조직별 스팸 정책 설정
+- **모니터링**: Prometheus를 통한 메일 서비스 메트릭 수집
+- **속도 제한**: 조직별 메일 발송 제한 및 API 호출 제한
 
 ---
 
@@ -220,18 +346,48 @@ async def get_inbox(
 - HTTPS 사용 필수 (프로덕션)
 - 개인정보 암호화 저장
 
-### 접근 로깅
+### 접근 로깅 및 감사
 ```python
-# 메일 접근 로그 테이블
+# 메일 접근 로그 테이블 (다중 조직 지원)
 class MailAccessLog(Base):
-    # 메일 접근 로그를 기록하는 테이블
-    id = Column(Integer, primary_key=True)
-    user_uuid = Column(String, comment="사용자 UUID")
-    action = Column(String, comment="수행된 작업 (send, read, delete 등)")
+    """메일 접근 로그를 기록하는 테이블 - 조직별 분리"""
+    __tablename__ = "mail_access_logs"
+    
+    id = Column(Integer, primary_key=True, comment="로그 고유 ID")
+    user_id = Column(Integer, ForeignKey("users.id"), comment="사용자 ID")
+    organization_id = Column(Integer, ForeignKey("organizations.id"), comment="조직 ID")
+    action = Column(String, comment="수행된 작업 (send, read, delete, forward 등)")
     mail_id = Column(String, comment="대상 메일 ID")
     ip_address = Column(String, comment="클라이언트 IP 주소")
     user_agent = Column(String, comment="사용자 에이전트")
+    request_id = Column(String, comment="요청 추적 ID")
+    response_status = Column(Integer, comment="응답 상태 코드")
+    processing_time = Column(Float, comment="처리 시간 (초)")
     created_at = Column(DateTime, comment="접근 시간")
+
+# 조직 활동 로그 테이블
+class OrganizationActivityLog(Base):
+    """조직 활동 로그를 기록하는 테이블"""
+    __tablename__ = "organization_activity_logs"
+    
+    id = Column(Integer, primary_key=True, comment="로그 고유 ID")
+    organization_id = Column(Integer, ForeignKey("organizations.id"), comment="조직 ID")
+    admin_user_id = Column(Integer, ForeignKey("users.id"), comment="관리자 ID")
+    action = Column(String, comment="수행된 작업")
+    target_resource = Column(String, comment="대상 리소스")
+    details = Column(JSON, comment="상세 정보")
+    created_at = Column(DateTime, comment="수행 시간")
+
+# 시스템 메트릭 로그 테이블
+class SystemMetricsLog(Base):
+    """시스템 성능 메트릭을 기록하는 테이블"""
+    __tablename__ = "system_metrics_logs"
+    
+    id = Column(Integer, primary_key=True, comment="메트릭 ID")
+    organization_id = Column(Integer, ForeignKey("organizations.id"), comment="조직 ID")
+    metric_type = Column(String, comment="메트릭 타입 (mail_sent, mail_received, api_calls)")
+    metric_value = Column(Float, comment="메트릭 값")
+    timestamp = Column(DateTime, comment="측정 시간")
 ```
 
 ---
@@ -244,28 +400,45 @@ class MailAccessLog(Base):
 - 로그 레벨 적절히 활용 (DEBUG, INFO, WARNING, ERROR)
 - 민감한 정보 로깅 금지
 
-### 로깅 패턴
+### 로깅 패턴 (SaaS 다중 조직 지원)
 ```python
-# 함수 시작 시
-logger.info(f"📧 {function_name} 시작 - 파라미터: {params}")
+# 함수 시작 시 (조직 정보 포함)
+logger.info(f"📧 {function_name} 시작 - 조직: {org_id}, 사용자: {user_id}, 파라미터: {params}")
 
-# 메일 발송 시작
-logger.info(f"📤 메일 발송 시작 - 수신자: {recipient}, 제목: {subject}")
+# 메일 발송 시작 (조직별 추적)
+logger.info(f"📤 메일 발송 시작 - 조직: {org_id}, 발송자: {sender}, 수신자: {recipient}, 제목: {subject}")
 
-# 성공 완료
-logger.info(f"✅ {function_name} 완료 - 결과: {result_summary}")
+# 백그라운드 작업 시작
+logger.info(f"🔄 백그라운드 작업 시작 - 작업: {task_name}, 조직: {org_id}, 작업ID: {task_id}")
 
-# 에러 발생
-logger.error(f"❌ {error_message}")
+# 성공 완료 (성능 메트릭 포함)
+logger.info(f"✅ {function_name} 완료 - 조직: {org_id}, 처리시간: {duration}ms, 결과: {result_summary}")
+
+# 조직별 제한 도달
+logger.warning(f"⚠️ 조직 제한 도달 - 조직: {org_id}, 제한타입: {limit_type}, 현재값: {current_value}")
+
+# 에러 발생 (조직 정보 포함)
+logger.error(f"❌ {error_message} - 조직: {org_id}, 사용자: {user_id}")
 logger.error(f"Traceback: {traceback.format_exc()}")
+
+# 보안 이벤트
+logger.warning(f"🔒 보안 이벤트 - 조직: {org_id}, 이벤트: {security_event}, IP: {ip_address}")
+
+# 성능 메트릭
+logger.info(f"📊 성능 메트릭 - 조직: {org_id}, 메트릭: {metric_name}, 값: {metric_value}")
 ```
 
-### 성능 모니터링
-- API 요청/응답 시간 측정
-- 메일 발송 성공률 및 처리 시간 추적
-- 데이터베이스 쿼리 성능 추적
-- Postfix/Dovecot 서버 상태 모니터링
-- 시스템 리소스 사용량 모니터링
+### 성능 모니터링 (Prometheus 기반)
+- **조직별 API 메트릭**: 요청/응답 시간, 처리량, 에러율 측정
+- **메일 서비스 메트릭**: 발송 성공률, 처리 시간, 큐 대기 시간 추적
+- **백그라운드 작업 모니터링**: Celery, APScheduler, RQ 작업 성능 추적
+- **데이터베이스 성능**: 쿼리 실행 시간, 연결 풀 상태, 조직별 사용량
+- **Postfix/Dovecot 모니터링**: 서버 상태, 메일 큐 크기, 처리량
+- **시스템 리소스**: CPU, 메모리, 디스크, 네트워크 사용량
+- **조직별 사용량 추적**: 메일 발송량, 저장 공간, API 호출 수
+- **SLA 모니터링**: 응답 시간, 가용성, 처리량 목표 달성률
+- **알림 시스템**: 임계값 초과 시 자동 알림 발송
+- **대시보드**: Grafana를 통한 실시간 모니터링 대시보드
 
 ---
 
@@ -424,14 +597,29 @@ npm install
 
 # 환경 변수 설정
 cp backend/.env.example backend/.env
-# .env 파일 편집
+# .env 파일 편집 (데이터베이스, Redis, 메일 서버 설정)
 
-# Docker Compose 실행
+# Docker Compose 실행 (PostgreSQL, Redis, Postfix 포함)
 docker-compose -f docker-compose.dev.yml up -d
+
+# 데이터베이스 마이그레이션
+cd backend
+alembic upgrade head
 
 # 개발 서버 실행
 # 백엔드: uvicorn main:app --reload --host 0.0.0.0 --port 8000
 # 프론트엔드: npm run dev
+# Celery 워커: celery -A app.celery worker --loglevel=info
+# Celery Beat: celery -A app.celery beat --loglevel=info
+
+# 테스트 실행
+pytest backend/tests/
+npm run test  # 프론트엔드 테스트
+
+# 코드 품질 검사
+flake8 backend/
+black backend/
+npm run lint  # 프론트엔드 린트
 ```
 
 ---
@@ -470,6 +658,6 @@ docker-compose -f docker-compose.dev.yml up -d
 
 **이 프로젝트 규칙은 기업용 메일서버 프로젝트의 품질과 일관성을 보장하기 위한 필수 가이드라인입니다.**
 
-**마지막 업데이트**: 2024년 12월  
+**마지막 업데이트**: 2025년 09월  
 **작성자**: SkyBoot Mail 개발팀  
 **버전**: 2.0

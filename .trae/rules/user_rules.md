@@ -17,22 +17,41 @@
 
 ## 🛠️ 개발 환경 규칙
 
-### 1.1 프로젝트 구조
-- **백엔드**: `backend/` 디렉토리에 FastAPI 기반 메일 서버 API
-  - `backend/test/` - 모든 백엔드 테스트 코드 (pytest 기반)
+### 1.1 프로젝트 구조 (SaaS 다중 조직 지원)
+- **백엔드**: `backend/` 디렉토리에 FastAPI 기반 SaaS 메일 서버 API
   - `backend/app/` - 메인 애플리케이션 코드
-  - `backend/migration/` - 데이터베이스 마이그레이션 스크립트
-- **프론트엔드**: `frontend/` 디렉토리에 Vue.js 3 기반 웹 메일 클라이언트
+    - `backend/app/database/` - 데이터베이스 연결 및 설정
+    - `backend/app/middleware/` - 미들웨어 (CORS, 인증, 테넌트 등)
+    - `backend/app/model/` - SQLAlchemy 데이터베이스 모델
+    - `backend/app/router/` - API 라우터 (auth, organization, user, mail 등)
+    - `backend/app/schemas/` - Pydantic 스키마
+    - `backend/app/service/` - 비즈니스 로직 서비스
+    - `backend/app/utils/` - 유틸리티 함수
+  - `backend/alembic/` - 데이터베이스 마이그레이션 스크립트 (Alembic)
+  - `backend/tests/` - 모든 백엔드 테스트 코드 (pytest 기반)
+- **프론트엔드**: `frontend/` 디렉토리에 Vue.js 3 + TypeScript 기반 SaaS 웹 메일 클라이언트
+  - `frontend/src/` - 메인 소스 코드
+    - `frontend/src/router/` - Vue Router 설정
+    - `frontend/src/services/` - API 서비스 클래스
+    - `frontend/src/stores/` - Pinia 상태 관리
+    - `frontend/src/views/` - 페이지 컴포넌트
   - `frontend/tests/` - 프론트엔드 테스트 코드
-- **메일 서버**: Postfix (SMTP), Dovecot (IMAP/POP3) 설정 파일
-- **환경 설정**: `.env` 파일을 사용하여 환경별 설정 관리
+- **메일 서버**: Postfix (SMTP), Dovecot (IMAP/POP3) 설정 파일 (조직별 가상 도메인 지원)
+- **환경 설정**: `.env` 파일을 사용하여 환경별 설정 관리 (Redis, PostgreSQL, 메일 서버 포함)
 - **의존성 관리**: `requirements.txt` (Python), `package.json` (Node.js)
+- **컨테이너화**: `docker-compose.yml`, `docker-compose.dev.yml` (PostgreSQL, Redis, Postfix 포함)
 
-### 1.2 환경 변수 관리
+### 1.2 환경 변수 관리 (SaaS 다중 조직 지원)
 - 모든 민감한 정보는 `.env` 파일에 저장
 - `.env.example` 파일로 필수 환경 변수 템플릿 제공
-- 메일 서버 설정 (SMTP, IMAP 포트, 인증 정보)
-- 데이터베이스 연결 정보 및 Redis 설정
+- **데이터베이스 설정**: PostgreSQL 연결 정보 (조직별 데이터 분리)
+- **Redis 설정**: 캐시, 세션, 백그라운드 작업 큐 관리
+- **메일 서버 설정**: SMTP, IMAP 포트, 인증 정보 (조직별 가상 도메인)
+- **백그라운드 작업**: Celery, APScheduler, RQ 설정
+- **클라우드 저장소**: boto3 AWS S3 설정 (첨부파일 저장)
+- **모니터링**: Prometheus 메트릭 수집 설정
+- **보안**: JWT 시크릿 키, 암호화 키
+- **조직 설정**: 기본 조직 정보, 제한 정책
 - 프로덕션 환경에서는 환경 변수로 직접 설정
 
 ### 1.3 버전 관리
@@ -41,13 +60,20 @@
 - 커밋 메시지는 한국어로 명확하게 작성
 - 메일 서버 설정 파일도 버전 관리에 포함
 
-### 1.4 개발 도구
+### 1.4 개발 도구 (SaaS 기술 스택)
 - **IDE**: Trae AI (권장), VS Code
-- **Python**: 3.11 이상
-- **Node.js**: 18 이상
-- **Docker**: 컨테이너 기반 개발 환경
-- **PostgreSQL**: 15 이상
-- **Redis**: 캐시 및 세션 관리
+- **Python**: 3.11 이상 (FastAPI, SQLAlchemy, Alembic)
+- **Node.js**: 18 이상 (Vue.js 3, TypeScript, Vite)
+- **데이터베이스**: PostgreSQL 15 이상
+- **캐시/큐**: Redis (세션, 캐시, 백그라운드 작업 큐)
+- **백그라운드 작업**: Celery, APScheduler, RQ
+- **모니터링**: Prometheus, Grafana
+- **클라우드 저장소**: AWS S3 (boto3)
+- **컨테이너**: Docker, Docker Compose
+- **메일 서버**: Postfix (SMTP), Dovecot (IMAP/POP3)
+- **웹서버**: Nginx (리버스 프록시)
+- **UI 프레임워크**: Vuestic UI
+- **테스트**: pytest (백엔드), Vitest (프론트엔드)
 
 ---
 
@@ -60,19 +86,32 @@
 - 타입 힌트 사용 필수 (`typing` 모듈 활용)
 - 메일 관련 함수는 명확한 네이밍 (예: `send_email`, `parse_mail_header`)
 
-### 2.2 FastAPI 개발 규칙
+### 2.2 FastAPI 개발 규칙 (SaaS 다중 조직 지원)
 - 모든 엔드포인트에 `summary`와 상세 docstring 작성
 - Pydantic 모델을 사용한 요청/응답 검증
 - 의존성 주입(Dependency Injection) 패턴 활용
+- **조직별 데이터 분리**: 모든 API에서 조직 컨텍스트 확인
+- **테넌트 미들웨어**: 요청별 조직 정보 자동 추출
+- **권한 기반 접근 제어**: 조직 내 역할별 권한 관리
 - 비동기 처리가 필요한 경우 `async/await` 사용
-- 메일 발송은 백그라운드 태스크로 처리
+- **백그라운드 작업**: Celery, APScheduler, RQ를 통한 메일 발송 및 처리
+- **API 버전 관리**: 조직별 기능 차이 지원
+- **속도 제한**: 조직별 API 호출 제한 적용
+- **모니터링**: Prometheus 메트릭 수집 및 추적
 
-### 2.3 Vue.js 개발 규칙
-- Composition API 사용 권장
-- TypeScript 적극 활용
-- Pinia를 통한 상태 관리
+### 2.3 Vue.js 개발 규칙 (SaaS 프론트엔드)
+- **Composition API** 사용 권장 (Vue 3)
+- **TypeScript** 적극 활용 (타입 안정성)
+- **Pinia**를 통한 상태 관리 (조직별 상태 분리)
+- **Vuestic UI** 컴포넌트 라이브러리 활용
+- **조직별 테마**: 조직별 브랜딩 및 UI 커스터마이징
+- **다국어 지원**: i18n을 통한 국제화
 - 컴포넌트 단위 개발 및 재사용성 고려
+- **반응형 디자인**: 모바일 및 데스크톱 지원
+- **API 서비스**: axios 기반 API 클라이언트
+- **라우터 가드**: 조직별 접근 권한 확인
 - ESLint 및 Prettier 설정 준수
+- **성능 최적화**: 코드 스플리팅, 레이지 로딩
 
 ### 2.4 에러 처리
 - 모든 예외는 적절한 HTTP 상태 코드와 함께 처리
@@ -84,18 +123,27 @@
 
 ## 🗄️ 데이터베이스 규칙
 
-### 3.1 스키마 설계
+### 3.1 스키마 설계 (SaaS 다중 조직 지원)
 - PostgreSQL을 기본 데이터베이스로 사용
 - SQLAlchemy ORM을 통한 데이터베이스 접근
 - 모든 테이블과 컬럼에 한국어 주석 작성
-- UUID 사용으로 보안성 강화 (`user_uuid` 필드)
-- Postfix/Dovecot 연동을 위한 가상 테이블 설계
+- **조직별 데이터 분리**: 모든 주요 테이블에 `organization_id` 외래 키
+- **조직 모델**: `Organization` 테이블로 다중 테넌트 지원
+- **사용자 모델**: 조직별 사용자 관리 및 역할 기반 권한
+- **메일 모델**: 조직별 메일 데이터 분리 및 수신자 관리
+- UUID 사용으로 보안성 강화 (조직 및 사용자 식별)
+- Postfix/Dovecot 연동을 위한 가상 테이블 설계 (조직별 도메인)
+- **감사 로그**: 조직별 활동 추적 및 시스템 메트릭
 
-### 3.2 테이블 명명 규칙
-- 테이블명: 복수형 snake_case (예: `mail_users`, `virtual_domains`)
-- 컬럼명: snake_case (예: `created_at`, `user_uuid`, `email_address`)
+### 3.2 테이블 명명 규칙 (SaaS 구조)
+- 테이블명: 복수형 snake_case (예: `organizations`, `users`, `mails`, `mail_recipients`)
+- 컬럼명: snake_case (예: `created_at`, `organization_id`, `email_address`)
 - 인덱스명: `idx_테이블명_컬럼명` 형식
-- 메일 관련 테이블: `mail_`, `virtual_` 접두사 사용
+- **조직 관련 테이블**: `organizations`, `organization_activity_logs`
+- **메일 관련 테이블**: `mails`, `mail_recipients`, `mail_access_logs`
+- **가상 도메인 테이블**: `virtual_domains`, `virtual_aliases` (Postfix 연동)
+- **시스템 테이블**: `system_metrics_logs`, `background_tasks`
+- **외래 키**: `organization_id`, `user_id` 등 일관된 명명
 
 ### 3.3 데이터 무결성
 - 필수 필드는 `nullable=False` 설정
@@ -104,11 +152,17 @@
 - 적절한 인덱스 설정으로 성능 최적화
 - 타임스탬프 필드는 timezone 정보 포함
 
-### 3.4 마이그레이션 관리
-- Alembic을 사용한 데이터베이스 스키마 버전 관리
+### 3.4 마이그레이션 관리 (Alembic)
+- **Alembic**을 사용한 데이터베이스 스키마 버전 관리
 - 모든 스키마 변경은 마이그레이션 스크립트로 관리
-- Postfix/Dovecot 연동 테이블 변경 시 서비스 재시작 고려
-- `alembic/` 디렉토리에 관련 스크립트 저장
+- **조직별 데이터 분리**: 기존 데이터 마이그레이션 시 조직 컨텍스트 고려
+- **Postfix/Dovecot 연동**: 가상 도메인 테이블 변경 시 메일 서버 재시작 고려
+- `backend/alembic/` 디렉토리에 관련 스크립트 저장
+- **마이그레이션 명령어**:
+  - `alembic revision --autogenerate -m "설명"` (새 마이그레이션 생성)
+  - `alembic upgrade head` (최신 버전으로 업그레이드)
+  - `alembic downgrade -1` (이전 버전으로 다운그레이드)
+- **환경별 설정**: 개발, 스테이징, 프로덕션 환경별 마이그레이션 관리
 
 ### 3.5 메일 데이터 관리
 - 메일 내용은 별도 테이블로 분리 저장
@@ -126,10 +180,19 @@
 - 일관된 응답 형식 유지
 - 메일 관련 리소스: `/api/mail/`, `/api/users/`, `/api/domains/`
 
-### 4.2 엔드포인트 명명 규칙
+### 4.2 엔드포인트 명명 규칙 (SaaS API 구조)
 - URL은 소문자와 하이픈 사용
-- 복수형 명사 사용 (예: `/api/mail/messages/`, `/api/users/`)
-- 메일 기능별 그룹화 (inbox, sent, drafts, trash)
+- 복수형 명사 사용 (예: `/api/organizations/`, `/api/users/`)
+- **조직별 API 그룹화**:
+  - `/api/auth/` - 인증 관련 (로그인, 회원가입, 토큰 관리)
+  - `/api/organizations/` - 조직 관리 (생성, 수정, 삭제, 설정)
+  - `/api/users/` - 사용자 관리 (조직 내 사용자)
+  - `/api/mail/core/` - 핵심 메일 기능 (발송, 수신, 관리)
+  - `/api/mail/convenience/` - 편의 기능 (템플릿, 자동 응답)
+  - `/api/mail/advanced/` - 고급 기능 (분석, 추적, 보고서)
+  - `/api/mail/setup/` - 메일 서버 설정 (도메인, 인증)
+  - `/api/debug/` - 디버깅 및 테스트 (개발 환경)
+- **조직 컨텍스트**: 모든 API에서 조직 정보 자동 추출
 - 버전 관리 고려 (필요시 `/v1/` 접두사)
 
 ### 4.3 응답 형식
@@ -139,12 +202,24 @@
 - 페이지네이션 지원 (`limit`, `offset` 파라미터)
 - 메일 목록 조회 시 필터링 옵션 제공
 
-### 4.4 메일 API 특화 기능
-- 메일 발송 API (`/api/mail/send`)
-- 메일함 조회 API (`/api/mail/inbox`, `/api/mail/sent`)
-- 메일 검색 API (`/api/mail/search`)
-- 첨부파일 업로드/다운로드 API
-- 메일 필터링 및 라벨링 API
+### 4.4 메일 API 특화 기능 (SaaS 다중 조직)
+- **핵심 메일 기능** (`/api/mail/core/`):
+  - 메일 발송 API (단일, 대량, 예약 발송)
+  - 메일함 조회 API (받은편지함, 보낸편지함, 임시보관함)
+  - 메일 검색 및 필터링 API
+  - 첨부파일 업로드/다운로드 API (AWS S3 연동)
+- **편의 기능** (`/api/mail/convenience/`):
+  - 메일 템플릿 관리 API
+  - 자동 응답 설정 API
+  - 메일 서명 관리 API
+  - 연락처 및 그룹 관리 API
+- **고급 기능** (`/api/mail/advanced/`):
+  - 메일 추적 및 분석 API
+  - 발송 통계 및 보고서 API
+  - A/B 테스트 API
+  - 스팸 필터 관리 API
+- **조직별 설정**: 모든 API에서 조직 컨텍스트 자동 적용
+- **백그라운드 처리**: 대량 메일 발송 시 비동기 처리
 
 ---
 
@@ -244,14 +319,19 @@
 
 ## 🧪 테스트 규칙
 
-### 8.1 테스트 구조
-- **백엔드 테스트**: `/backend/test/` 디렉토리에 모든 백엔드 테스트 코드 구성
+### 8.1 테스트 구조 (SaaS 다중 조직 지원)
+- **백엔드 테스트**: `/backend/tests/` 디렉토리에 모든 백엔드 테스트 코드 구성
 - **프론트엔드 테스트**: `/frontend/tests/` 디렉토리에 프론트엔드 테스트 코드 구성
-- pytest 프레임워크 사용 (백엔드)
-- 단위 테스트, 통합 테스트, E2E 테스트 구분
-- 메일 발송 테스트는 별도 테스트 환경 사용
-- 테스트 파일 명명 규칙: `test_*.py` (예: `test_mail_api.py`, `test_auth.py`)
-- 테스트 클래스 명명 규칙: `Test*` (예: `TestMailAPI`, `TestUserAuth`)
+- **pytest 프레임워크** 사용 (백엔드), **Vitest** 사용 (프론트엔드)
+- **테스트 분류**:
+  - 단위 테스트: 개별 함수 및 클래스 테스트
+  - 통합 테스트: API 엔드포인트 및 데이터베이스 연동 테스트
+  - E2E 테스트: 전체 워크플로우 테스트
+  - **조직별 테스트**: 다중 조직 환경에서의 데이터 분리 테스트
+- **메일 서버 테스트**: 별도 테스트 환경 사용 (Docker 컨테이너)
+- **테스트 파일 명명 규칙**: `test_*.py` (예: `test_mail_api.py`, `test_organization.py`)
+- **테스트 클래스 명명 규칙**: `Test*` (예: `TestMailAPI`, `TestOrganization`)
+- **픽스처 관리**: 조직별 테스트 데이터 및 사용자 계정 설정
 
 ### 8.2 테스트 커버리지
 - 핵심 비즈니스 로직 80% 이상 커버리지
@@ -260,15 +340,18 @@
 - 데이터베이스 연동 테스트
 - 보안 기능 테스트
 
-### 8.3 테스트 데이터
-- **백엔드 테스트 데이터**: `/backend/test/` 폴더 내에 테스트용 데이터 파일 구성
-- 실제 메일 시나리오를 반영한 테스트 데이터
-- 다양한 메일 형식 지원 테스트 (HTML, 텍스트, 멀티파트)
-- 첨부파일 처리 테스트 (이미지, 문서, 압축파일)
-- 에러 시나리오 테스트 (잘못된 이메일 형식, 권한 오류 등)
-- 성능 테스트 (대용량 메일 처리, 동시 접속)
-- 테스트용 사용자 계정 및 메일 도메인 설정
-- Mock 데이터 및 Fixture 파일 관리
+### 8.3 테스트 데이터 (SaaS 다중 조직)
+- **백엔드 테스트 데이터**: `/backend/tests/` 폴더 내에 테스트용 데이터 파일 구성
+- **조직별 테스트 시나리오**: 다중 조직 환경에서의 데이터 분리 테스트
+- **실제 메일 시나리오**: 조직별 메일 발송 및 수신 테스트
+- **다양한 메일 형식**: HTML, 텍스트, 멀티파트 메일 테스트
+- **첨부파일 처리**: 이미지, 문서, 압축파일 (AWS S3 연동 테스트)
+- **에러 시나리오**: 잘못된 이메일 형식, 권한 오류, 조직 접근 제한 등
+- **성능 테스트**: 대용량 메일 처리, 동시 접속, 조직별 제한 테스트
+- **백그라운드 작업 테스트**: Celery, APScheduler, RQ 작업 테스트
+- **테스트용 조직 및 사용자**: 다중 조직 환경 시뮬레이션
+- **Mock 데이터**: 외부 서비스 (AWS S3, Prometheus) 모킹
+- **Fixture 파일**: 조직별 설정 및 권한 테스트 데이터
 
 ### 8.4 메일 서버 테스트
 - SMTP 연결 테스트
@@ -277,13 +360,21 @@
 - 스팸 필터링 테스트
 - 백업/복구 테스트
 
-### 8.5 테스트 실행 방법
-- **백엔드 테스트 실행**: `cd backend && python -m pytest test/`
-- **특정 테스트 파일 실행**: `python -m pytest test/test_mail_api.py`
-- **테스트 커버리지 확인**: `python -m pytest test/ --cov=app --cov-report=html`
-- **테스트 결과 리포트**: `python -m pytest test/ --html=reports/report.html`
-- **병렬 테스트 실행**: `python -m pytest test/ -n auto` (pytest-xdist 필요)
-- **테스트 환경 변수**: `TEST_DATABASE_URL`, `TEST_REDIS_URL` 등 별도 설정
+### 8.5 테스트 실행 방법 (SaaS 환경)
+- **백엔드 테스트 실행**: `cd backend && python -m pytest tests/`
+- **특정 테스트 파일 실행**: `python -m pytest tests/test_mail_api.py`
+- **조직별 테스트 실행**: `python -m pytest tests/test_organization.py`
+- **테스트 커버리지 확인**: `python -m pytest tests/ --cov=app --cov-report=html`
+- **테스트 결과 리포트**: `python -m pytest tests/ --html=reports/report.html`
+- **병렬 테스트 실행**: `python -m pytest tests/ -n auto` (pytest-xdist 필요)
+- **프론트엔드 테스트**: `cd frontend && npm run test`
+- **E2E 테스트**: `npm run test:e2e`
+- **테스트 환경 변수**: 
+  - `TEST_DATABASE_URL` (테스트 PostgreSQL)
+  - `TEST_REDIS_URL` (테스트 Redis)
+  - `TEST_AWS_S3_BUCKET` (테스트 S3 버킷)
+  - `TEST_ORGANIZATION_ID` (테스트 조직 ID)
+- **Docker 테스트 환경**: `docker-compose -f docker-compose.test.yml up -d`
 
 ---
 
