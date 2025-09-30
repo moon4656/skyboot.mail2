@@ -121,7 +121,7 @@ async def get_user(
         )
     
     user_service = UserService(db)
-    user = await user_service.get_user_by_id(current_org['id'], user_id)
+    user = await user_service.get_user_by_id(current_org['org_id'], user_id)
     
     if not user:
         raise HTTPException(
