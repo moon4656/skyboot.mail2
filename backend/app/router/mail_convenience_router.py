@@ -52,7 +52,7 @@ async def search_mails(
                 Mail.sender_uuid == mail_user.user_uuid,
                 Mail.mail_uuid.in_(
                 db.query(MailRecipient.mail_uuid).filter(
-                    MailRecipient.recipient_email == mail_user.email
+                    MailRecipient.recipient_uuid == mail_user.user_uuid
                 )
                 )
             )
@@ -82,12 +82,22 @@ async def search_mails(
         
         # 수신자 필터
         if search_request.recipient_email:
-            recipient_mail_uuids = db.query(MailRecipient.mail_uuid).filter(
-                MailRecipient.recipient_email.ilike(f"%{search_request.recipient_email}%")
+            # 이메일로 MailUser를 찾고, 해당 user_uuid로 MailRecipient 검색
+            recipient_users = db.query(MailUser).filter(
+                MailUser.email.ilike(f"%{search_request.recipient_email}%")
             ).all()
-            mail_uuids = [mail_uuid[0] for mail_uuid in recipient_mail_uuids]
-            if mail_uuids:
-                query = query.filter(Mail.mail_uuid.in_(mail_uuids))
+            recipient_uuids = [user.user_uuid for user in recipient_users]
+            
+            if recipient_uuids:
+                recipient_mail_uuids = db.query(MailRecipient.mail_uuid).filter(
+                    MailRecipient.recipient_uuid.in_(recipient_uuids)
+                ).all()
+                mail_uuids = [mail_uuid[0] for mail_uuid in recipient_mail_uuids]
+                if mail_uuids:
+                    query = query.filter(Mail.mail_uuid.in_(mail_uuids))
+                else:
+                    # 수신자가 없으면 빈 결과 반환
+                    query = query.filter(False)
             else:
                 # 수신자가 없으면 빈 결과 반환
                 query = query.filter(False)
@@ -153,7 +163,7 @@ async def search_mails(
             current_recipient = db.query(MailRecipient).filter(
                 and_(
                     MailRecipient.mail_uuid == mail.mail_uuid,
-                    MailRecipient.recipient_email == mail_user.email
+                    MailRecipient.recipient_uuid == mail_user.user_uuid
                 )
             ).first()
             is_read = False  # 기본값으로 설정 (추후 읽음 상태 추적 기능 구현 필요)
@@ -374,7 +384,7 @@ async def get_unread_mails(
             and_(
                 Mail.org_id == current_org_id,
                 MailInFolder.folder_uuid == inbox_folder.folder_uuid,
-                MailRecipient.recipient_email == mail_user.email
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         )
         
@@ -399,7 +409,7 @@ async def get_unread_mails(
             # 현재 사용자의 읽음 상태 확인
             user_recipient = db.query(MailRecipient).filter(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_email == mail_user.email
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             ).first()
             # TODO: is_read 필드가 MailRecipient 모델에 없음 - 임시로 False 설정
             is_read = False  # user_recipient.is_read if user_recipient else False
@@ -481,7 +491,7 @@ async def get_starred_mails(
                     Mail.sender_uuid == mail_user.user_uuid,
                     Mail.mail_uuid.in_(
                         db.query(MailRecipient.mail_uuid).filter(
-                            MailRecipient.recipient_email == mail_user.email
+                            MailRecipient.recipient_uuid == mail_user.user_uuid
                         )
                     )
                 ),
@@ -510,7 +520,7 @@ async def get_starred_mails(
             # 현재 사용자의 읽음 상태 확인
             user_recipient = db.query(MailRecipient).filter(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_email == mail_user.email
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             ).first()
             # TODO: is_read 필드가 MailRecipient 모델에 없음 - 임시로 False 설정
             is_read = False  # user_recipient.is_read if user_recipient else False
@@ -598,7 +608,7 @@ async def mark_mail_as_read(
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_email == mail_user.email
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first() is not None
         
@@ -609,7 +619,7 @@ async def mark_mail_as_read(
         recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_email == mail_user.email
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first()
         
@@ -684,7 +694,7 @@ async def mark_mail_as_unread(
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_email == mail_user.email
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first() is not None
         
@@ -859,7 +869,7 @@ async def star_mail(
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_email == mail_user.email
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first() is not None
         
@@ -934,7 +944,7 @@ async def unstar_mail(
         is_recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_email == mail_user.email
+                MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first() is not None
         
@@ -1008,7 +1018,7 @@ async def get_search_suggestions(
                     Mail.sender_uuid == mail_user.user_uuid,
                     Mail.mail_uuid.in_(
                         db.query(MailRecipient.mail_uuid).filter(
-                            MailRecipient.recipient_email == mail_user.email
+                            MailRecipient.recipient_uuid == mail_user.user_uuid
                         )
                     )
                 ),
@@ -1035,7 +1045,7 @@ async def get_search_suggestions(
                     Mail.sender_uuid == mail_user.user_uuid,
                     Mail.mail_uuid.in_(
                         db.query(MailRecipient.mail_uuid).filter(
-                            MailRecipient.recipient_email == mail_user.email
+                            MailRecipient.recipient_uuid == mail_user.user_uuid
                         )
                     )
                 )

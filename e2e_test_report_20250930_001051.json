@@ -1,0 +1,122 @@
+{
+  "test_summary": {
+    "total_tests": 13,
+    "passed_tests": 10,
+    "failed_tests": 3,
+    "success_rate": 76.92
+  },
+  "test_details": [
+    {
+      "test_name": "사용자 정보 조회 (e2e.sender@skyboot.kr)",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:49.911553",
+      "details": {
+        "message": "사용자 정보 조회 성공: e2e_sender"
+      }
+    },
+    {
+      "test_name": "사용자 정보 조회 (e2e.receiver@skyboot.kr)",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:49.913879",
+      "details": {
+        "message": "사용자 정보 조회 성공: e2e_receiver"
+      }
+    },
+    {
+      "test_name": "토큰 갱신",
+      "status": "FAIL",
+      "timestamp": "2025-09-30T00:10:49.931390",
+      "details": {
+        "message": "토큰 갱신 실패: 401"
+      }
+    },
+    {
+      "test_name": "메일 발송",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:49.949900",
+      "details": {
+        "message": "메일 발송 성공: None"
+      }
+    },
+    {
+      "test_name": "보낸 메일함 조회",
+      "status": "FAIL",
+      "timestamp": "2025-09-30T00:10:50.971529",
+      "details": {
+        "message": "보낸 메일함 조회 실패: 500"
+      }
+    },
+    {
+      "test_name": "받은 메일함 조회",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:50.990374",
+      "details": {
+        "message": "받은 메일 0개 조회"
+      }
+    },
+    {
+      "test_name": "두 번째 메일 발송",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:51.007574",
+      "details": {
+        "message": "두 번째 메일 발송 성공: None"
+      }
+    },
+    {
+      "test_name": "폴더 생성",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:51.018653",
+      "details": {
+        "message": "폴더 생성 성공: bf333ad1-1403-4206-aebf-8173ff4f9553"
+      }
+    },
+    {
+      "test_name": "폴더 목록 조회",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:51.029540",
+      "details": {
+        "message": "폴더 5개 조회"
+      }
+    },
+    {
+      "test_name": "메일 분석",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:51.038665",
+      "details": {
+        "message": "분석 완료 - 총 메일: 0개"
+      }
+    },
+    {
+      "test_name": "메일 검색",
+      "status": "FAIL",
+      "timestamp": "2025-09-30T00:10:51.038665",
+      "details": {
+        "message": "메일 검색 실패: 405"
+      }
+    },
+    {
+      "test_name": "메일 통계",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:51.061052",
+      "details": {
+        "message": "통계 조회 성공 - 총 메일: 0개"
+      }
+    },
+    {
+      "test_name": "읽지 않은 메일 조회",
+      "status": "PASS",
+      "timestamp": "2025-09-30T00:10:51.072350",
+      "details": {
+        "message": "읽지 않은 메일 0개"
+      }
+    }
+  ],
+  "generated_at": "2025-09-30T00:10:51.091655",
+  "test_environment": {
+    "base_url": "http://localhost:8000",
+    "test_users": [
+      "e2e.sender@skyboot.kr",
+      "e2e.receiver@skyboot.kr"
+    ]
+  }
+}
