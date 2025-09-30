@@ -8,7 +8,6 @@
 - 📨 **Postfix 연동 메일 발송** - 안정적이고 확장 가능한 메일 발송
 - 📊 **메일 발송 이력 관리** - 발송 상태 추적 및 로그 관리
 - 🎨 **Vuestic UI 기반 프론트엔드** - 현대적이고 반응형 사용자 인터페이스
-- 🐳 **Docker 컨테이너화** - 쉬운 배포 및 확장
 - 🗄️ **PostgreSQL 데이터베이스** - 안정적인 데이터 저장
 
 ## 🏗️ 시스템 아키텍처
@@ -32,10 +31,11 @@
 
 ### 사전 요구사항
 
-- Docker & Docker Compose
 - Git
 - Node.js 18+ (개발 환경)
 - Python 3.11+ (개발 환경)
+- PostgreSQL 15+
+- Postfix (메일 서버)
 
 ### 1. 저장소 클론
 
@@ -52,23 +52,51 @@ cp backend/.env.example backend/.env
 # 필요에 따라 .env 파일 수정
 ```
 
-### 3. Docker Compose로 실행
+### 3. 데이터베이스 설정
 
-#### 프로덕션 환경
 ```bash
-docker-compose up -d
+# PostgreSQL 데이터베이스 생성
+createdb skyboot_mail
+
+# 데이터베이스 초기화
+psql -d skyboot_mail -f backend/init.sql
 ```
 
-#### 개발 환경
+### 4. 백엔드 실행
+
 ```bash
-docker-compose -f docker-compose.dev.yml up -d
+cd backend
+
+# 가상환경 생성 및 활성화
+python -m venv venv
+# Windows:
+venv\Scripts\Activate.ps1
+# Linux/Mac:
+source venv/bin/activate
+
+# 의존성 설치
+pip install -r requirements.txt
+
+# 개발 서버 실행
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 4. 접속
+### 5. 프론트엔드 실행
 
-- **웹 인터페이스**: http://localhost
+```bash
+cd frontend
+
+# 의존성 설치
+npm install
+
+# 개발 서버 실행
+npm run dev
+```
+
+### 6. 접속
+
+- **웹 인터페이스**: http://localhost:5173
 - **API 문서**: http://localhost:8000/docs
-- **MailHog (개발용)**: http://localhost:8025
 
 ## 📁 프로젝트 구조
 
@@ -84,7 +112,6 @@ skyboot.mail2/
 │   │   └── database.py     # 데이터베이스 연결
 │   ├── main.py             # FastAPI 앱 진입점
 │   ├── requirements.txt    # Python 의존성
-│   ├── Dockerfile          # Docker 이미지 빌드
 │   ├── init.sql           # 데이터베이스 초기화
 │   └── test_mail.py       # 메일 발송 테스트
 ├── frontend/               # Vue.js 프론트엔드
@@ -96,10 +123,7 @@ skyboot.mail2/
 │   │   └── services/      # API 서비스
 │   ├── package.json       # Node.js 의존성
 │   ├── vite.config.ts     # Vite 설정
-│   ├── Dockerfile         # Docker 이미지 빌드
 │   └── nginx.conf         # Nginx 설정
-├── docker-compose.yml      # 프로덕션 Docker Compose
-├── docker-compose.dev.yml  # 개발 Docker Compose
 └── README.md              # 프로젝트 문서
 ```
 
@@ -187,25 +211,14 @@ FastAPI 자동 생성 문서를 통해 API를 테스트할 수 있습니다:
 - SQL 인젝션 방지 (SQLAlchemy ORM)
 - 환경 변수를 통한 민감한 정보 관리
 
-## 🐳 Docker 설정
+## 🔧 포트 설정
 
-### 서비스 구성
+### 기본 포트
 
-- **frontend**: Nginx + Vue.js 빌드 결과물
-- **backend**: FastAPI + Uvicorn
-- **postgres**: PostgreSQL 15
-- **postfix**: 메일 서버
-- **redis**: 세션 관리 (선택사항)
-- **mailhog**: 개발용 메일 테스트 도구
-
-### 포트 매핑
-
-- `80`: 프론트엔드 (Nginx)
+- `5173`: 프론트엔드 (Vite 개발 서버)
 - `8000`: 백엔드 API
 - `5432`: PostgreSQL
 - `25`: Postfix SMTP
-- `6379`: Redis
-- `8025`: MailHog 웹 UI (개발용)
 
 ## 🔧 설정 옵션
 
@@ -272,13 +285,10 @@ CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ### 로그 확인
 
 ```bash
-# 모든 서비스 로그
-docker-compose logs
-
-# 특정 서비스 로그
-docker-compose logs backend
-docker-compose logs frontend
-docker-compose logs postfix
+# 백엔드 로그 (개발 서버 실행 시 콘솔에서 확인)
+# 프론트엔드 로그 (브라우저 개발자 도구에서 확인)
+# Postfix 로그
+sudo tail -f /var/log/mail.log
 ```
 
 ## 🤝 기여하기

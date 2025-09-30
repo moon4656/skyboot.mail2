@@ -21,7 +21,6 @@
 - **백그라운드 작업**: Celery, APScheduler, RQ
 - **인증**: JWT 토큰 (python-jose), bcrypt 패스워드 해싱
 - **데이터베이스**: PostgreSQL 15+ with Alembic 마이그레이션
-- **컨테이너화**: Docker, Docker Compose
 - **웹서버**: Nginx (프록시 및 정적 파일 서빙)
 - **로깅**: Python logging, structlog
 - **모니터링**: Prometheus
@@ -71,8 +70,7 @@ skyboot.mail2/
 │   ├── alembic/              # 데이터베이스 마이그레이션
 │   ├── migration/            # 커스텀 마이그레이션 스크립트
 │   ├── test/                 # 테스트 코드
-│   ├── backups/              # 백업 파일
-│   └── Dockerfile            # Docker 이미지 빌드
+│   └── backups/              # 백업 파일
 ├── frontend/                  # Vue.js 프론트엔드
 │   ├── src/
 │   │   ├── views/            # 페이지 컴포넌트
@@ -87,13 +85,10 @@ skyboot.mail2/
 │   │   └── main.ts           # 앱 진입점
 │   ├── package.json          # Node.js 의존성
 │   ├── vite.config.ts        # Vite 설정
-│   ├── nginx.conf            # Nginx 설정
-│   └── Dockerfile            # Docker 이미지 빌드
+│   └── nginx.conf            # Nginx 설정
 ├── docs/                     # 프로젝트 문서
 ├── attachments/              # 첨부파일 저장소
 ├── backups/                  # 시스템 백업
-├── docker-compose.yml        # 프로덕션 Docker Compose
-├── docker-compose.dev.yml    # 개발 Docker Compose
 ├── postfix_main.cf          # Postfix 메인 설정
 ├── postfix_master.cf        # Postfix 마스터 설정
 ├── dovecot.conf             # Dovecot 설정

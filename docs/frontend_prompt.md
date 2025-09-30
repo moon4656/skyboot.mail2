@@ -6,7 +6,6 @@ FastAPI 백엔드 + Vite + TypeScript + Vuestic(Vue3) 프론트엔드 + Postfix 
 1. 프로젝트 구조
    - backend/ → FastAPI (Python)
    - frontend/ → Vuestic (Vue3, Vite 기반)
-   - docker-compose.yml → backend + postfix 서비스 실행
    - README.md → 설치 및 실행 가이드 작성
 
 2. 백엔드 (FastAPI)
@@ -17,7 +16,7 @@ FastAPI 백엔드 + Vite + TypeScript + Vuestic(Vue3) 프론트엔드 + Postfix 
      - POST /auth/refresh : 토큰 재발급
      - POST /mail/send : Postfix SMTP 이용 메일 발송
    - DB: Postgresql (User, Token 테이블)
-   - 메일 발송 시 로컬 Postfix 컨테이너 사용 (host: postfix, port: 25)
+   - 메일 발송 시 로컬 Postfix 서버 사용 (host: localhost, port: 25)
 
 3. 프론트엔드 (Vuestic + Vue3 + Vite + TypeScript)
    - Vuestic UI로 로그인/회원가입 페이지 작성
@@ -25,11 +24,11 @@ FastAPI 백엔드 + Vite + TypeScript + Vuestic(Vue3) 프론트엔드 + Postfix 
    - 메일 발송 테스트 페이지(/send-mail) 작성 (제목, 수신자, 본문 입력 → API 호출)
 
 4. Postfix
-   - docker-compose.yml 안에서 postfix 컨테이너 실행
+   - 시스템에 설치된 Postfix 서버 사용
    - 외부 메일 발송은 불필요, 로컬 로그 확인 가능하도록 최소 설정
 
 5. 실행
-   - `docker-compose up` 으로 FastAPI + Postfix 기동
+   - backend는 `uvicorn main:app --reload` 로 실행
    - frontend는 `pnpm dev` 또는 `npm run dev` 로 실행
    - README.md에 전체 실행 과정 포함
 

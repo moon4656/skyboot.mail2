@@ -116,7 +116,8 @@ class MailRecipient(Base):
     
     id = Column(BigInteger, primary_key=True, index=True)
     mail_uuid = Column(String(50), ForeignKey("mails.mail_uuid"), nullable=False, comment="메일 UUID (mails.mail_uuid 참조)")
-    recipient_uuid = Column(String(50), ForeignKey("mail_users.user_uuid"), nullable=False, comment="수신자 UUID (mail_users.user_uuid 참조)")
+    recipient_uuid = Column(String(50), ForeignKey("mail_users.user_uuid"), nullable=True, comment="수신자 UUID (mail_users.user_uuid 참조)")
+    recipient_email = Column(String(255), nullable=False, comment="수신자 이메일 주소")
     recipient_type = Column(String(10), default=RecipientType.TO.value, comment="수신자 타입")
     created_at = Column(DateTime, server_default=func.now(), comment="생성 시간")
     
