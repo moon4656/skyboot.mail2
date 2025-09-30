@@ -58,10 +58,20 @@ smtpd_recipient_restrictions =
     reject_unauth_destination,
     permit
 
-# SASL settings
+# SASL settings (서버 인증 - 수신)
 smtpd_sasl_type = dovecot
 smtpd_sasl_path = private/auth
 smtpd_sasl_auth_enable = yes
 smtpd_sasl_security_options = noanonymous
 smtpd_sasl_local_domain = $myhostname
 broken_sasl_auth_clients = yes
+
+# SASL 클라이언트 설정 (Gmail SMTP 릴레이용 - 발신)
+smtp_sasl_auth_enable = yes
+smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
+smtp_sasl_security_options = noanonymous, noplaintext
+smtp_tls_security_level = encrypt
+smtp_sasl_mechanism_filter = plain, login
+smtp_sasl_tls_security_options = noanonymous
+smtp_tls_note_starttls_offer = yes
+smtp_tls_CAfile = /etc/ssl/certs/ca-certificates.crt

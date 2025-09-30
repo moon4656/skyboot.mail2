@@ -4,12 +4,16 @@ from sqlalchemy.sql import func
 from ..database.user import Base
 import uuid
 
+def generate_user_uuid(ctx=None):
+    """사용자 UUID 생성 함수"""
+    return str(uuid.uuid4())
+
 class User(Base):
     """사용자 모델 - 조직 연결"""
     __tablename__ = "users"
 
     user_id = Column(String(50), primary_key=True, index=True, comment="사용자 ID")
-    user_uuid = Column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()))
+    user_uuid = Column(String(36), unique=True, index=True, default=generate_user_uuid)
     org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="소속 조직 ID")
     
     email = Column(String(255), index=True, nullable=False, comment="이메일 주소")

@@ -357,7 +357,7 @@ class AuthService:
                 return None
             
             # 비밀번호 검증
-            if not verify_password(password, user.hashed_password):
+            if not AuthService.verify_password(password, user.hashed_password):
                 logger.warning(f"❌ 비밀번호 불일치 - 이메일: {email}")
                 return None
             

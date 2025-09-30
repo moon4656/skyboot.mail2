@@ -1,0 +1,39 @@
+{
+  "test_summary": {
+    "total_tests": 10,
+    "passed_tests": 8,
+    "failed_tests": 2,
+    "success_rate": "80.0%",
+    "total_time": "0.54초",
+    "timestamp": "2025-09-30T13:34:08.536392"
+  },
+  "test_results": [
+    {
+      "test_name": "시나리오 5: 토큰 없음",
+      "status": "FAIL",
+      "error": ""
+    },
+    {
+      "test_name": "시나리오 6: 데이터베이스 오류",
+      "status": "FAIL",
+      "error": ""
+    },
+    {
+      "test_name": "시나리오 1: 신규 사용자 메일 계정 초기화",
+      "status": "PASS",
+      "message": "신규 사용자 메일 계정 초기화 성공: admin@skyboot.com",
+      "response_time": 0.22342324256896973,
+      "details": {
+        "status_code": 200,
+        "user_email": "admin@skyboot.com",
+        "org_id": "bbf43d4b-3862-4ab0-9a03-522213ccb7a2",
+        "response_message": "메일 계정이 이미 설정되어 있습니다."
+      }
+    }
+  ],
+  "environment_info": {
+    "python_version": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+    "test_file": "C:\\Users\\eldorado\\skyboot.mail2\\backend\\test\\test_mail_setup_router.py",
+    "project_root": "C:\\Users\\eldorado\\skyboot.mail2\\backend"
+  }
+}

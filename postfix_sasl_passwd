@@ -1,0 +1,18 @@
+# Gmail SMTP 릴레이 인증 정보
+# 형식: [smtp.gmail.com]:587 username:app_password
+[smtp.gmail.com]:587 moon4656@gmail.com:vuvnxrmnkwrntghe
+
+# ⚠️ 중요: YOUR_APP_PASSWORD_HERE를 실제 Gmail 앱 비밀번호로 교체하세요!
+# 
+# Gmail 앱 비밀번호 생성 방법:
+# 1. https://myaccount.google.com/ → 보안
+# 2. 2단계 인증 활성화 (필수)
+# 3. 앱 비밀번호 → 메일 → 기타(맞춤 이름) → "SkyBoot Mail Server"
+# 4. 생성된 16자리 비밀번호를 공백 없이 입력
+# 
+# 예시: [smtp.gmail.com]:587 moon4656@gmail.com:abcdefghijklmnop
+# 
+# 주의사항:
+# - 일반 Gmail 비밀번호가 아닌 앱 비밀번호 사용 필수
+# - 앱 비밀번호는 16자리 영문+숫자 조합
+# - 공백 제거하여 입력 (abcd efgh ijkl mnop → abcdefghijklmnop)

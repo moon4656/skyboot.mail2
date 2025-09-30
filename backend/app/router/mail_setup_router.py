@@ -48,7 +48,7 @@ async def setup_mail_account(
         
         # 새 메일 사용자 생성
         mail_user = MailUser(
-            user_id=str(current_user.user_uuid),
+            user_id=current_user.user_uuid,
             user_uuid=current_user.user_uuid,  # User의 user_uuid를 사용
             org_id=current_user.org_id,
             email=current_user.email,

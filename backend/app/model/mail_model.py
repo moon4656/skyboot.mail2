@@ -33,12 +33,16 @@ class FolderType(str, Enum):
     TRASH = "trash"
     CUSTOM = "custom"
 
+def generate_mail_user_uuid(ctx=None):
+    """메일 사용자 UUID 생성 함수"""
+    return str(uuid.uuid4())
+
 class MailUser(Base):
     """메일 사용자 모델 - 조직 연결"""
     __tablename__ = "mail_users"
     
     user_id = Column(String(50), primary_key=True, index=True, comment="연결된 사용자 ID")
-    user_uuid = Column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()), comment="사용자 UUID")
+    user_uuid = Column(String(36), unique=True, index=True, default=generate_mail_user_uuid, comment="사용자 UUID")
     org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="소속 조직 ID")
     
     email = Column(String(255), index=True, nullable=False, comment="이메일 주소")

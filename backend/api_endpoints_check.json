@@ -1,0 +1,46 @@
+{
+  "timestamp": "2025-09-30T14:28:32.430487",
+  "total_endpoints": 51,
+  "mail_endpoints_count": 27,
+  "convenience_router_status": {
+    "/api/v1/mail/search/suggestions": true,
+    "/api/v1/mail/search": true,
+    "/api/v1/mail/stats": true,
+    "/api/v1/mail/unread": true,
+    "/api/v1/mail/starred": true
+  },
+  "advanced_router_status": {
+    "/api/v1/mail/folders": true,
+    "/api/v1/mail/analytics": true,
+    "/api/v1/mail/backup": true
+  },
+  "all_mail_endpoints": [
+    "/api/v1/mail/analytics",
+    "/api/v1/mail/attachments/{attachment_id}",
+    "/api/v1/mail/backup",
+    "/api/v1/mail/backup/{backup_filename}",
+    "/api/v1/mail/drafts",
+    "/api/v1/mail/drafts/{mail_uuid}",
+    "/api/v1/mail/folders",
+    "/api/v1/mail/folders/{folder_uuid}",
+    "/api/v1/mail/folders/{folder_uuid}/mails/{mail_uuid}",
+    "/api/v1/mail/inbox",
+    "/api/v1/mail/inbox/{mail_uuid}",
+    "/api/v1/mail/mark-all-read",
+    "/api/v1/mail/restore",
+    "/api/v1/mail/search",
+    "/api/v1/mail/search/suggestions",
+    "/api/v1/mail/send",
+    "/api/v1/mail/sent",
+    "/api/v1/mail/sent/{mail_uuid}",
+    "/api/v1/mail/setup-mail-account",
+    "/api/v1/mail/starred",
+    "/api/v1/mail/stats",
+    "/api/v1/mail/trash",
+    "/api/v1/mail/trash/{mail_uuid}",
+    "/api/v1/mail/unread",
+    "/api/v1/mail/{mail_uuid}/read",
+    "/api/v1/mail/{mail_uuid}/star",
+    "/api/v1/mail/{mail_uuid}/unread"
+  ]
+}

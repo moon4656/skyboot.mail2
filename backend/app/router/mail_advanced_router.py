@@ -9,6 +9,7 @@ import json
 import os
 import zipfile
 import tempfile
+import uuid
 from pathlib import Path
 
 from ..database.user import get_db
@@ -117,7 +118,6 @@ async def create_folder(
             raise HTTPException(status_code=400, detail="폴더명이 이미 존재합니다")
         
         # UUID 생성
-        import uuid
         folder_uuid = str(uuid.uuid4())
         
         # 새 폴더 생성 (조직 ID 추가)

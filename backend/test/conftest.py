@@ -24,11 +24,11 @@ from app.model.user_model import User
 from app.model.organization_model import Organization
 from app.service.auth_service import get_password_hash
 
-# 테스트 데이터베이스 URL
-TEST_DATABASE_URL = "postgresql://postgres:postgres123@localhost:5432/skyboot_mail_test"
+# 테스트 데이터베이스 URL - SQLite 사용 (PostgreSQL 연결 문제 우회)
+TEST_DATABASE_URL = "sqlite:///./test_skyboot_mail.db"
 
 # 테스트용 엔진 및 세션 생성
-test_engine = create_engine(TEST_DATABASE_URL, echo=False)
+test_engine = create_engine(TEST_DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 @pytest.fixture(scope="session")
@@ -43,23 +43,8 @@ def setup_test_database():
     """테스트 데이터베이스 설정 - 세션 시작 시 한 번만 실행"""
     print("🔧 테스트 데이터베이스 설정 중...")
     
-    # 테스트 데이터베이스 생성 (존재하지 않는 경우)
-    try:
-        # 기본 postgres 데이터베이스에 연결하여 테스트 DB 생성
-        admin_engine = create_engine("postgresql://postgres:postgres123@localhost:5432/postgres")
-        with admin_engine.connect() as conn:
-            conn.execute(text("COMMIT"))  # 자동 커밋 모드로 전환
-            try:
-                conn.execute(text("CREATE DATABASE skyboot_mail_test"))
-                print("✅ 테스트 데이터베이스 생성 완료")
-            except Exception as e:
-                if "already exists" in str(e):
-                    print("ℹ️ 테스트 데이터베이스가 이미 존재합니다")
-                else:
-                    print(f"⚠️ 테스트 데이터베이스 생성 중 오류: {e}")
-    except Exception as e:
-        print(f"❌ 테스트 데이터베이스 설정 실패: {e}")
-        pytest.skip("테스트 데이터베이스 설정 실패")
+    # SQLite 데이터베이스는 자동으로 생성됨
+    print("ℹ️ SQLite 테스트 데이터베이스 사용")
     
     # 테스트 테이블 생성
     try:
@@ -147,17 +132,33 @@ def test_user(db_session, test_organization) -> User:
     return user
 
 @pytest.fixture
-def admin_user(db_session, test_organization) -> User:
-    """테스트용 관리자 사용자 픽스처"""
-    admin = User(
-        user_id=f"admin_user_{uuid.uuid4().hex[:8]}",
-        username=f"admin_{uuid.uuid4().hex[:8]}",
-        email="admin@test.com",
-        password_hash=get_password_hash("adminpassword123"),
-        org_id=test_organization.org_id,
+def admin_user(db_session) -> User:
+    """테스트용 관리자 사용자 픽스처 - SkyBoot 조직"""
+    # SkyBoot 조직 생성
+    skyboot_org = Organization(
+        org_id="bbf43d4b-3862-4ab0-9a03-522213ccb7a2",
+        org_code="SKYBOOT",
+        name="SkyBoot",
+        subdomain="skyboot",
+        domain="skyboot.com",
+        admin_email="admin@skyboot.com",
         is_active=True,
-        is_verified=True,
-        is_admin=True
+        max_users=100
+    )
+    db_session.add(skyboot_org)
+    db_session.commit()
+    
+    # 관리자 사용자 생성
+    admin = User(
+        user_id="admin_skyboot",
+        user_uuid="441eb65c-bed0-4e75-9cdd-c95425e635a0",
+        username="admin_skyboot",
+        email="admin@skyboot.com",
+        hashed_password=get_password_hash("admin123"),  # 테스트에서 기대하는 비밀번호
+        org_id=skyboot_org.org_id,
+        is_active=True,
+        is_email_verified=True,
+        role="admin"
     )
     db_session.add(admin)
     db_session.commit()
@@ -188,7 +189,7 @@ def admin_auth_headers(client, admin_user) -> dict:
     """관리자 인증 헤더 픽스처"""
     login_data = {
         "email": admin_user.email,
-        "password": "adminpassword123"
+        "password": "admin123"  # 테스트에서 기대하는 비밀번호
     }
     
     response = client.post("/api/v1/auth/login", json=login_data)

@@ -1,0 +1,74 @@
+{
+  "timestamp": "2025-09-30T14:17:29.657117",
+  "summary": {
+    "total": 9,
+    "404_errors": 0,
+    "auth_required": 0,
+    "success": 0
+  },
+  "results": [
+    {
+      "endpoint": "검색 자동완성",
+      "url": "http://localhost:8000/api/v1/mail/search/suggestions",
+      "method": "GET",
+      "status_code": 403,
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "endpoint": "메일 검색",
+      "url": "http://localhost:8000/api/v1/mail/search",
+      "method": "POST",
+      "status_code": 403,
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "endpoint": "메일 통계",
+      "url": "http://localhost:8000/api/v1/mail/stats",
+      "method": "GET",
+      "status_code": 403,
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "endpoint": "읽지 않은 메일",
+      "url": "http://localhost:8000/api/v1/mail/unread",
+      "method": "GET",
+      "status_code": 403,
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "endpoint": "중요 표시된 메일",
+      "url": "http://localhost:8000/api/v1/mail/starred",
+      "method": "GET",
+      "status_code": 403,
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "endpoint": "폴더 목록 조회",
+      "url": "http://localhost:8000/api/v1/mail/folders",
+      "method": "GET",
+      "status_code": 403,
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "endpoint": "폴더 생성",
+      "url": "http://localhost:8000/api/v1/mail/folders",
+      "method": "POST",
+      "status_code": 403,
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "endpoint": "메일 분석",
+      "url": "http://localhost:8000/api/v1/mail/analytics",
+      "method": "GET",
+      "status_code": 403,
+      "status": "PERMISSION_DENIED"
+    },
+    {
+      "endpoint": "메일 백업",
+      "url": "http://localhost:8000/api/v1/mail/backup",
+      "method": "POST",
+      "status_code": 403,
+      "status": "PERMISSION_DENIED"
+    }
+  ]
+}

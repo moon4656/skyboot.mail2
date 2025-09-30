@@ -6,6 +6,7 @@ API 요청 속도 제한 및 DDoS 방지를 위한 미들웨어
 import logging
 import time
 import json
+import traceback
 from typing import Dict, Optional, Tuple, Callable
 from fastapi import Request, Response, HTTPException
 from fastapi.responses import JSONResponse
@@ -162,57 +163,55 @@ rate_limit_service = RateLimitService()
 
 async def rate_limit_middleware(request: Request, call_next: Callable):
     """
-    속도 제한 미들웨어 함수
+    속도 제한 미들웨어
     
-    Args:
-        request: HTTP 요청
-        call_next: 다음 미들웨어/핸들러
-        
-    Returns:
-        HTTP 응답
+    IP 주소, 사용자, 조직별로 요청 속도를 제한합니다.
     """
     start_time = time.time()
     
     try:
+        # Redis가 사용 불가능한 경우 제한 없이 통과
+        if not redis_client:
+            logger.warning("⚠️ Redis 연결 없음 - 속도 제한 비활성화")
+            response = await call_next(request)
+            return response
+        
         # 제외 경로 확인
         if rate_limit_service._is_excluded_path(request.url.path):
-            return await call_next(request)
-        
-        # Redis가 없으면 제한 없이 통과
-        if not redis_client:
-            logger.debug("⚠️ Redis 없음 - 속도 제한 건너뜀")
-            return await call_next(request)
+            response = await call_next(request)
+            return response
         
         # 클라이언트 정보 추출
         client_info = rate_limit_service._extract_client_info(request)
         
-        # 속도 제한 검사
+        # 속도 제한 확인
         is_allowed, limit_info = rate_limit_service._check_rate_limits(request, client_info)
         
         if not is_allowed:
-            logger.warning(f"🚫 속도 제한 초과: {limit_info}")
+            # 제한 초과 시 429 응답 반환
+            logger.warning(f"🚫 속도 제한 초과 - IP: {client_info['ip']}, 경로: {request.url.path}")
             return rate_limit_service._create_rate_limit_response(limit_info)
         
-        # 요청 카운터 증가
-        rate_limit_service._increment_counters(request, client_info)
-        
-        # 다음 미들웨어/핸들러 호출
+        # 요청 처리
         response = await call_next(request)
         
-        # 응답 헤더에 속도 제한 정보 추가 (limit_info가 있을 때만)
-        if limit_info:
-            rate_limit_service._add_rate_limit_headers(response, limit_info)
+        # 카운터 증가
+        rate_limit_service._increment_counters(request, client_info)
         
-        # 처리 시간 로깅
-        process_time = time.time() - start_time
-        logger.debug(f"🚦 속도 제한 미들웨어 처리 완료 - 시간: {process_time:.3f}초")
+        # 응답 헤더에 제한 정보 추가
+        rate_limit_service._add_rate_limit_headers(response, limit_info)
+        
+        # 처리 시간 로깅 (DEBUG 레벨)
+        processing_time = time.time() - start_time
+        logger.debug(f"⚡ 요청 처리 완료 - {request.method} {request.url.path} ({processing_time:.3f}초)")
         
         return response
         
     except Exception as e:
         logger.error(f"❌ 속도 제한 미들웨어 오류: {str(e)}")
-        # 오류 발생 시 요청을 통과시킴 (가용성 우선)
-        return await call_next(request)
+        # 오류 발생 시 제한 없이 통과
+        response = await call_next(request)
+        return response
 
 
 # 호환성을 위한 클래스 (사용하지 않음)

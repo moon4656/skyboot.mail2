@@ -112,7 +112,7 @@ async def send_mail(
                         # 조직 내에 없는 경우 외부 사용자로 임시 생성
                         external_user_uuid = str(uuid.uuid4())
                         recipient_user = MailUser(
-                            user_id=external_user_uuid,  # user_id 추가
+                            user_id=mail_user.user_id,  # user_id 추가
                             email=email,
                             password_hash="external_user",  # 외부 사용자 표시
                             is_active=False,
@@ -183,7 +183,7 @@ async def send_mail(
                         # 조직 내에 없는 경우 외부 사용자로 임시 생성
                         external_user_uuid = str(uuid.uuid4())
                         recipient_user = MailUser(
-                            user_id=external_user_uuid,  # user_id 추가
+                            user_id=mail_user.user_id,  # user_id 추가
                             email=email,
                             password_hash="external_user",  # 외부 사용자 표시
                             is_active=False,
@@ -244,6 +244,209 @@ async def send_mail(
     except Exception as e:
         db.rollback()
         logger.error(f"❌ 메일 발송 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"메일 발송 중 오류가 발생했습니다: {str(e)}")
+
+
+@router.post("/send-json", response_model=MailSendResponse, summary="메일 발송 (JSON)")
+async def send_mail_json(
+    mail_data: MailSendRequest,
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> MailSendResponse:
+    """
+    JSON 요청으로 메일 발송 API
+    조직 내에서 메일을 발송합니다.
+    """
+    try:
+        logger.info(f"📤 메일 발송 시작 (JSON) - 조직: {current_org_id}, 사용자: {current_user.email}, 수신자: {mail_data.to}")
+        
+        # 조직 내에서 메일 사용자 조회
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.user_uuid,
+            MailUser.org_id == current_org_id
+        ).first()
+        if not mail_user:
+            raise HTTPException(status_code=404, detail="Mail user not found in this organization")
+        
+        # 메일 생성 (조직 ID 포함)
+        mail_uuid = str(uuid.uuid4())
+        mail = Mail(
+            mail_uuid=mail_uuid,
+            sender_uuid=mail_user.user_uuid,
+            org_id=current_org_id,
+            subject=mail_data.subject,
+            body_text=mail_data.body_text,
+            body_html=mail_data.body_html,
+            sent_at=datetime.utcnow(),
+            status=MailStatus.SENT,
+            priority=mail_data.priority
+        )
+        db.add(mail)
+        db.flush()
+        
+        # 수신자 처리
+        recipients = []
+        
+        # TO 수신자 처리 (조직별 격리)
+        if mail_data.to:
+            for email in mail_data.to:
+                # 같은 조직 내에서 수신자 사용자 찾기
+                recipient_user = db.query(MailUser).filter(
+                    MailUser.email == email,
+                    MailUser.org_id == current_org_id
+                ).first()
+                
+                if not recipient_user:
+                    # 조직 내에 없는 경우 외부 사용자로 임시 생성
+                    external_user_uuid = str(uuid.uuid4())
+                    recipient_user = MailUser(
+                        user_id=external_user_uuid,  # user_id 추가
+                        user_uuid=external_user_uuid,
+                        email=email,
+                        password_hash="external_user",  # 외부 사용자 표시
+                        is_active=False,
+                        org_id=current_org_id  # 현재 조직에 속하도록 설정
+                    )
+                    db.add(recipient_user)
+                    db.flush()
+                
+                recipient = MailRecipient(
+                    mail_uuid=mail.mail_uuid,
+                    recipient_email=email,
+                    recipient_type=RecipientType.TO.value
+                )
+                recipients.append(recipient)
+                db.add(recipient)
+        
+        # CC 수신자 처리 (조직별 격리)
+        if mail_data.cc:
+            for email in mail_data.cc:
+                # 같은 조직 내에서 수신자 사용자 찾기
+                recipient_user = db.query(MailUser).filter(
+                    MailUser.email == email,
+                    MailUser.org_id == current_org_id
+                ).first()
+                
+                if not recipient_user:
+                    # 조직 내에 없는 경우 외부 사용자로 임시 생성
+                    external_user_uuid = str(uuid.uuid4())
+                    recipient_user = MailUser(
+                        user_id=external_user_uuid,  # user_id 추가
+                        user_uuid=external_user_uuid,
+                        email=email,
+                        password_hash="external_user",  # 외부 사용자 표시
+                        is_active=False,
+                        org_id=current_org_id  # 현재 조직에 속하도록 설정
+                    )
+                    db.add(recipient_user)
+                    db.flush()
+                
+                recipient = MailRecipient(
+                    mail_uuid=mail.mail_uuid,
+                    recipient_email=email,
+                    recipient_type=RecipientType.CC.value
+                )
+                recipients.append(recipient)
+                db.add(recipient)
+        
+        # BCC 수신자 처리 (조직별 격리)
+        if mail_data.bcc:
+            for email in mail_data.bcc:
+                # 같은 조직 내에서 수신자 사용자 찾기
+                recipient_user = db.query(MailUser).filter(
+                    MailUser.email == email,
+                    MailUser.org_id == current_org_id
+                ).first()
+                
+                if not recipient_user:
+                    # 조직 내에 없는 경우 외부 사용자로 임시 생성
+                    external_user_uuid = str(uuid.uuid4())
+                    recipient_user = MailUser(
+                        user_id=external_user_uuid,  # user_id 추가
+                        user_uuid=external_user_uuid,
+                        email=email,
+                        password_hash="external_user",  # 외부 사용자 표시
+                        is_active=False,
+                        org_id=current_org_id  # 현재 조직에 속하도록 설정
+                    )
+                    db.add(recipient_user)
+                    db.flush()
+                
+                recipient = MailRecipient(
+                    mail_uuid=mail.mail_uuid,
+                    recipient_email=email,
+                    recipient_type=RecipientType.BCC.value
+                )
+                recipients.append(recipient)
+                db.add(recipient)
+        
+        # 메일 로그 생성
+        mail_log = MailLog(
+            mail_uuid=mail.mail_uuid,
+            user_uuid=mail_user.user_uuid,
+            action="SEND",
+            details=f"메일 발송 - 수신자: {len(recipients)}명"
+        )
+        db.add(mail_log)
+        
+        # 실제 메일 발송 (SMTP)
+        try:
+            mail_service = MailService()
+            smtp_result = await mail_service.send_email_smtp(
+                sender_email=mail_user.email,
+                recipient_emails=[r.recipient_email for r in recipients],
+                subject=mail_data.subject,
+                body_text=mail_data.body_text,
+                body_html=mail_data.body_html,
+                org_id=current_org_id
+            )
+            
+            if not smtp_result.get('success', False):
+                logger.error(f"❌ SMTP 발송 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {smtp_result.get('error')}")
+                mail.status = MailStatus.FAILED
+                
+                # 실패 로그 추가
+                fail_log = MailLog(
+                    mail_uuid=mail.mail_uuid,
+                    user_uuid=mail_user.user_uuid,
+                    action="SEND_FAILED",
+                    details=f"SMTP 발송 실패: {smtp_result.get('error')}"
+                )
+                db.add(fail_log)
+            else:
+                logger.info(f"✅ SMTP 발송 성공 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                
+        except Exception as smtp_error:
+            logger.error(f"❌ SMTP 발송 예외 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(smtp_error)}")
+            mail.status = MailStatus.FAILED
+            
+            # 실패 로그 추가
+            fail_log = MailLog(
+                mail_uuid=mail.mail_uuid,
+                user_uuid=mail_user.user_uuid,
+                action="SEND_FAILED",
+                details=f"SMTP 발송 예외: {str(smtp_error)}"
+            )
+            db.add(fail_log)
+        
+        db.commit()
+        
+        logger.info(f"✅ 메일 발송 완료 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자 수: {len(recipients)}")
+        
+        return MailSendResponse(
+            success=True,
+            message="메일이 성공적으로 발송되었습니다.",
+            mail_uuid=mail.mail_uuid,
+            sent_at=mail.sent_at
+        )
+        
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ 메일 발송 실패 (JSON) - 조직: {current_org_id}, 사용자: {current_user.email}, 오류: {str(e)}")
         raise HTTPException(status_code=500, detail=f"메일 발송 중 오류가 발생했습니다: {str(e)}")
 
 

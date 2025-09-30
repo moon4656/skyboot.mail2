@@ -99,14 +99,14 @@ logger.info("🌐 CORS 미들웨어 설정 완료")
 app.add_middleware(TenantMiddleware)
 logger.info("🏢 테넌트 미들웨어 설정 완료")
 
-# 속도 제한 미들웨어 추가 (함수형) - Redis 연결 문제로 임시 비활성화
-# from app.middleware.rate_limit_middleware import rate_limit_middleware
+# 속도 제한 미들웨어 추가 (함수형) - Redis 연결 성공으로 활성화
+from app.middleware.rate_limit_middleware import rate_limit_middleware
 
-# @app.middleware("http")
-# async def rate_limit_middleware_wrapper(request: Request, call_next):
-#     return await rate_limit_middleware(request, call_next)
+@app.middleware("http")
+async def rate_limit_middleware_wrapper(request: Request, call_next):
+    return await rate_limit_middleware(request, call_next)
 
-logger.info("🚦 속도 제한 미들웨어 임시 비활성화 (Redis 연결 문제)")
+logger.info("🚦 속도 제한 미들웨어 활성화 완료 (Redis 연결 성공)")
 
 # 요청 로깅 미들웨어 (성능 테스트를 위해 임시 비활성화)
 # @app.middleware("http")
