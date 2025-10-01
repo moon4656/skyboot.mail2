@@ -234,33 +234,33 @@ class OrganizationCreateRequest(BaseModel):
     """조직 생성 요청 스키마"""
     organization: OrganizationCreate = Field(..., description="조직 정보")
     admin_email: EmailStr = Field(..., description="관리자 이메일")
-    admin_password: str = Field(..., min_length=8, max_length=100, description="관리자 비밀번호")
+    admin_password: str = Field(..., min_length=4, max_length=100, description="관리자 비밀번호")
     admin_name: Optional[str] = Field(None, max_length=100, description="관리자 이름")
 
     @validator('admin_password')
     def validate_admin_password(cls, v):
         """관리자 비밀번호 검증"""
-        if len(v) < 8:
+        if len(v) < 4:
             raise ValueError('비밀번호는 최소 8자 이상이어야 합니다.')
         
         # 비밀번호 강도 검증
         import re
         
         # 대문자 포함 확인
-        if not re.search(r'[A-Z]', v):
-            raise ValueError('비밀번호에 대문자가 포함되어야 합니다.')
+        # if not re.search(r'[A-Z]', v):
+        #     raise ValueError('비밀번호에 대문자가 포함되어야 합니다.')
         
-        # 소문자 포함 확인
-        if not re.search(r'[a-z]', v):
-            raise ValueError('비밀번호에 소문자가 포함되어야 합니다.')
+        # # 소문자 포함 확인
+        # if not re.search(r'[a-z]', v):
+        #     raise ValueError('비밀번호에 소문자가 포함되어야 합니다.')
         
-        # 숫자 포함 확인
-        if not re.search(r'\d', v):
-            raise ValueError('비밀번호에 숫자가 포함되어야 합니다.')
+        # # 숫자 포함 확인
+        # if not re.search(r'\d', v):
+        #     raise ValueError('비밀번호에 숫자가 포함되어야 합니다.')
         
-        # 특수문자 포함 확인
-        if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
-            raise ValueError('비밀번호에 특수문자가 포함되어야 합니다.')
+        # # 특수문자 포함 확인
+        # if not re.search(r'[!@#$%^&*(),.?":{}|<>]', v):
+        #     raise ValueError('비밀번호에 특수문자가 포함되어야 합니다.')
         
         return v
 

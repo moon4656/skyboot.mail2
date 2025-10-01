@@ -30,7 +30,7 @@ wsl sudo passwd testuser
 wsl -u root adduser -D testuser
 
 # 2. testuser에게 메일 발송
-wsl -e sh -c "echo '테스트 메일' | mail -s '제목' testuser@localhost"
+wsl -e sh -c "echo '테스트 메일' | mail -s '제목' moon4656@gmail.com"
 wsl -e sh -c "echo 'testuser님 안녕하세요! 메일박스 생성을 위한 테스트 메일입니다.' | mail -s 'testuser 메일박스 생성 테스트2' testuser"
 
 # 2. testuser 메일박스 확인
@@ -59,5 +59,29 @@ su -
 
 # 사용자 환경까지 완전히 전환
 su - username
+
+# 4. postfix mailname 설정
+wsl
+wsl ls -la /etc/mailname
+echo 'skyboot.co.kr' | tee /etc/mailname
+
+# 5. postfix mailname 확인
+wsl cat /etc/mailname
+tail -f /var/log/mail.log
+
+# 메일 발송 테스트
+echo "Test" | mail -s "test" moon4656@gmail.com
+
+# 6. postfix sasl_passwd 
+/etc/postfix/main.cf
+
+# 6.1 postfix sasl_passwd 설정
+/etc/postfix/sasl_passwd
+sudo postmap /etc/postfix/sasl_passwd
+sudo chmod 600 /etc/postfix/sasl_passwd /etc/postfix/sasl_passwd.db
+sudo systemctl restart postfix
+
+# 6.2 postfix master.cf 설정
+/etc/postfix/master.cf
 
 

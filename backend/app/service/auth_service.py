@@ -325,12 +325,12 @@ class AuthService:
                 detail="토큰 생성 중 오류가 발생했습니다."
             )
     
-    def authenticate_user(self, email: str, password: str, org_id: Optional[str] = None):
+    def authenticate_user(self, user_id: str, password: str, org_id: Optional[str] = None):
         """
         사용자 인증을 수행합니다.
         
         Args:
-            email: 사용자 이메일
+            user_id: 사용자 ID
             password: 비밀번호
             org_id: 조직 ID (선택사항)
             
@@ -338,16 +338,16 @@ class AuthService:
             인증된 사용자 객체 또는 None
         """
         try:
-            logger.info(f"🔐 사용자 인증 시도 - 이메일: {email}, 조직 ID: {org_id}")
+            logger.info(f"🔐 사용자 인증 시도 - 사용자 ID: {user_id}, 조직 ID: {org_id}")
             
             # 사용자 조회 (조직 ID가 있으면 조직 내에서만 검색)
-            query = self.db.query(User).filter(User.email == email)
+            query = self.db.query(User).filter(User.user_id == user_id)
             if org_id:
                 query = query.filter(User.org_id == org_id)
             
             user = query.first()
             if not user:
-                logger.warning(f"❌ 사용자를 찾을 수 없음 - 이메일: {email}, 조직 ID: {org_id}")
+                logger.warning(f"❌ 사용자를 찾을 수 없음 - 사용자 ID: {user_id}, 조직 ID: {org_id}")
                 return None
             
             # 조직 활성화 상태 확인
@@ -358,15 +358,15 @@ class AuthService:
             
             # 비밀번호 검증
             if not AuthService.verify_password(password, user.hashed_password):
-                logger.warning(f"❌ 비밀번호 불일치 - 이메일: {email}")
+                logger.warning(f"❌ 비밀번호 불일치 - 사용자 ID: {user_id}")
                 return None
             
             # 사용자 활성화 상태 확인
             if not user.is_active:
-                logger.warning(f"❌ 비활성화된 사용자 - 이메일: {email}")
+                logger.warning(f"❌ 비활성화된 사용자 - 사용자 ID: {user_id}")
                 return None
             
-            logger.info(f"✅ 사용자 인증 성공 - 이메일: {email}, 조직 ID: {user.org_id}")
+            logger.info(f"✅ 사용자 인증 성공 - 사용자 ID: {user_id}, 조직 ID: {user.org_id}")
             return user
             
         except Exception as e:

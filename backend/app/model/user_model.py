@@ -58,7 +58,7 @@ class LoginLog(Base):
     
     id = Column(Integer, primary_key=True, index=True, comment="로그 ID")
     user_uuid = Column(String(50), nullable=True, comment="사용자 UUID (로그인 성공 시)")
-    email = Column(String(255), nullable=False, comment="로그인 시도 이메일")
+    user_id = Column(String(50), nullable=False, comment="로그인 시도 사용자 ID")
     ip_address = Column(String(45), nullable=True, comment="클라이언트 IP 주소")
     user_agent = Column(Text, nullable=True, comment="사용자 에이전트")
     login_status = Column(String(20), nullable=False, comment="로그인 상태 (success, failed)")
