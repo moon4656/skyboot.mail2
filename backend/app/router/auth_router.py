@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
+
+from app.schemas.user_schema import UserBase
 from ..database.user import get_db
 from ..model.user_model import User, RefreshToken, LoginLog
 from ..schemas import UserCreate, UserResponse, UserLogin, Token, TokenRefresh, AccessToken, MessageResponse, LoginLogCreate
@@ -111,19 +113,41 @@ async def register(
     회원가입 엔드포인트
     조직 내에서 사용자를 생성합니다.
     """
-    # 조직 ID를 선택적으로 가져오기 (없으면 기본 조직 사용)
-    try:
-        org_id = getattr(request.state, 'org_id', None)
-    except AttributeError:
-        org_id = None
     
-    # 조직 ID가 없으면 첫 번째 조직을 기본 조직으로 사용
-    if not org_id:
+    # 조직 정보를 request.state에서 가져오기 (tenant_middleware에서 설정됨)
+    try:
+        org_code = getattr(request.state, 'org_code', None)
+        org_id = getattr(request.state, 'org_id', None)
+        organization = getattr(request.state, 'organization', None)
+    except AttributeError:
+        org_code = None
+        org_id = None
+        organization = None
+    
+    logger.debug(f"📨 request.state 정보: org_code={org_code}, org_id={org_id}")
+    logger.debug(f"📨 organization 정보: {organization}")
+    
+    # tenant_middleware에서 조직 정보가 설정되지 않은 경우 기본 조직 찾기
+    if not org_id or not org_code:
         from app.model.organization_model import Organization
-        default_org = db.query(Organization).first()
+        
+        # 기본 조직 코드로 찾기
+        default_org = db.query(Organization).filter(
+            Organization.org_code == "default",
+            Organization.deleted_at.is_(None)
+        ).first()
+        
+        # 기본 조직이 없으면 첫 번째 활성 조직 사용
+        if not default_org:
+            default_org = db.query(Organization).filter(
+                Organization.deleted_at.is_(None),
+                Organization.is_active == True
+            ).first()
+        
         if default_org:
-            # 새로운 조직 모델에서는 org_id 컬럼을 사용
             org_id = default_org.org_id
+            org_code = default_org.org_code
+            logger.info(f"🏠 기본 조직 사용: {org_code} (ID: {org_id})")
         else:
             raise HTTPException(
                 status_code=404, 
@@ -162,8 +186,12 @@ async def register(
         # 새 사용자 생성
         hashed_password = AuthService.get_password_hash(user_data.password)
         user_uuid = str(uuid.uuid4())
+        
+        # user_id를 자동 생성 (조직코드 + 사용자명 조합)
+        # user_id = f"{org_code}_{user_data.username}"
+        
         new_user = User(
-            user_id=str(uuid.uuid4()),  # UUID로 ID 생성
+            user_id=user_data.user_id,
             user_uuid=user_uuid,
             org_id=org_id,
             email=user_data.email,
@@ -191,10 +219,9 @@ async def register(
         db.add(mail_user)
         db.commit()
         
-        logger.info(f"✅ 사용자 등록 완료 - 조직: {org_id}, 사용자: {new_user.user_id}, 메일 사용자 생성 완료")
+        logger.info(f"✅ 사용자 등록 완료 - 조직: {org_code}, 사용자: {new_user.user_id}, 메일 사용자 생성 완료")
         
         return UserResponse(
-            id=new_user.user_id,
             user_id=new_user.user_id,
             user_uuid=new_user.user_uuid,
             email=new_user.email,
@@ -215,6 +242,7 @@ async def register(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during user registration"
         )
+
 
 @router.post("/refresh", response_model=AccessToken)
 async def refresh_token(token_data: TokenRefresh, db: Session = Depends(get_db)) -> AccessToken:

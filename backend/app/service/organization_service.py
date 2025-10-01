@@ -368,8 +368,13 @@ class OrganizationService:
                     detail="조직을 찾을 수 없습니다."
                 )
             
-            # 수정 가능한 필드 업데이트
-            update_data = org_data.dict(exclude_unset=True)
+            # 수정 가능한 필드 업데이트 - Pydantic 모델인지 딕셔너리인지 확인
+            if hasattr(org_data, 'dict'):
+                # Pydantic 모델인 경우
+                update_data = org_data.dict(exclude_unset=True)
+            else:
+                # 이미 딕셔너리인 경우
+                update_data = org_data
             
             for field, value in update_data.items():
                 if hasattr(org, field):
@@ -679,8 +684,13 @@ class OrganizationService:
             # 현재 설정 가져오기
             current_settings = org.settings or {}
             
-            # 업데이트할 설정 적용
-            update_data = settings_update.dict(exclude_unset=True)
+            # 업데이트할 설정 적용 - Pydantic 모델인지 딕셔너리인지 확인
+            if hasattr(settings_update, 'dict'):
+                # Pydantic 모델인 경우
+                update_data = settings_update.dict(exclude_unset=True)
+            else:
+                # 이미 딕셔너리인 경우
+                update_data = settings_update
             current_settings.update(update_data)
             
             # 설정 저장

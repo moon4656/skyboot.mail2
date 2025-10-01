@@ -7,9 +7,9 @@ class UserBase(BaseModel):
     user_id: str = Field(..., description="사용자 ID")
     username: str = Field(..., min_length=3, max_length=100, description="사용자명")
     email: EmailStr = Field(..., description="이메일 주소")
-    org_id: str = Field(..., description="조직 ID")
+    org_code: str = Field(..., description="조직 코드")
 
-class UserCreate(BaseModel):
+class UserCreate(UserBase):
     """사용자 생성 스키마"""
     username: str = Field(..., min_length=3, max_length=100, description="사용자명")
     email: EmailStr = Field(..., description="이메일 주소")
@@ -66,9 +66,7 @@ class ErrorResponse(BaseModel):
 
 class LoginLogCreate(BaseModel):
     """로그인 로그 생성 스키마"""
-    user_id: Optional[str] = Field(None, description="사용자 ID (로그인 성공 시)")
     user_uuid: Optional[str] = Field(None, description="사용자 UUID (로그인 성공 시)")
-    email: str = Field(..., description="로그인 시도 이메일")
     ip_address: Optional[str] = Field(None, description="클라이언트 IP 주소")
     user_agent: Optional[str] = Field(None, description="사용자 에이전트")
     login_status: str = Field(..., description="로그인 상태 (success, failed)")

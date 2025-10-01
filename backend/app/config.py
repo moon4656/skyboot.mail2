@@ -22,12 +22,12 @@ class SaaSSettings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     
     # 데이터베이스 설정 (다중 테넌트 지원)
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:postgres123@localhost:5432/skyboot_mail_saas")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://postgres:safe70!!@localhost:5432/skybootmail")
     DB_HOST: str = os.getenv("DB_HOST", "localhost")
     DB_PORT: int = int(os.getenv("DB_PORT", "5432"))
     DB_USER: str = os.getenv("DB_USER", "postgres")
-    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "postgres123")
-    DB_NAME: str = os.getenv("DB_NAME", "skyboot_mail_saas")
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "safe70!!")
+    DB_NAME: str = os.getenv("DB_NAME", "skybootmail")
     DB_POOL_SIZE: int = 20
     DB_MAX_OVERFLOW: int = 30
     DB_POOL_TIMEOUT: int = 30

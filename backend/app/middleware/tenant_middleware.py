@@ -210,13 +210,16 @@ class TenantMiddleware(BaseHTTPMiddleware):
             raise e
             
         except Exception as e:
+            import traceback
             logger.error(f"❌ 테넌트 미들웨어 오류: {str(e)}")
+            logger.error(f"❌ 상세 traceback: {traceback.format_exc()}")
             return JSONResponse(
                 status_code=500,
                 content={
                     "error": "TENANT_MIDDLEWARE_ERROR",
                     "message": "테넌트 처리 중 오류가 발생했습니다.",
-                    "details": str(e) if hasattr(settings, 'is_development') and settings.is_development() else None
+                    "details": str(e),
+                    "traceback": traceback.format_exc()
                 }
             )
         
@@ -321,7 +324,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 return None
             
             # 데이터베이스에서 조직 정보 조회
-            org_info = await self._get_organization_by_id_or_uuid(org_id, None)
+            org_info = await self._get_organization_by_id_or_uuid(org_id)
             if org_info:
                 logger.info(f"✅ JWT에서 조직 정보 추출 성공: {org_info['name']} ({org_id})")
                 return org_info
@@ -344,20 +347,22 @@ class TenantMiddleware(BaseHTTPMiddleware):
             조직 정보 또는 None
         """
         try:
-            # X-Organization-Code 헤더 우선 확인
-            org_code = request.headers.get("X-Organization-Code")
-            if org_code:
-                return await self._get_organization_by_code(org_code)
+            logger.debug(f"📋 헤더에서 조직 추출 시도 - 전체 헤더: {dict(request.headers)}")
             
             # X-Organization-ID/UUID 헤더 확인
-            org_id = request.headers.get("X-Organization-ID")
-            org_uuid = request.headers.get("X-Organization-UUID")
+            org_id = request.headers.get("X-Organization-ID") or request.headers.get("X-Organization-UUID")
+            if org_id:
+                logger.debug(f"📋 헤더에서 조직 ID/UUID 추출: {org_id}")
+                return await self._get_organization_by_id_or_uuid(org_id)
             
-            if org_id or org_uuid:
-                return await self._get_organization_by_id_or_uuid(org_id, org_uuid)
+            # X-Organization-Code 헤더 확인
+            org_code = request.headers.get("X-Organization-Code")
+            if org_code:
+                logger.debug(f"📋 헤더에서 조직 코드 추출: {org_code}")
+                return await self._get_organization_by_code(org_code)
             
             return None
-            
+                        
         except Exception as e:
             logger.error(f"❌ 헤더에서 조직 정보 추출 오류: {str(e)}")
             return None
@@ -429,17 +434,17 @@ class TenantMiddleware(BaseHTTPMiddleware):
             조직 정보 또는 None
         """
         try:
-            # org_code 쿼리 파라미터 우선 확인
+            # org_id/org_uuid 쿼리 파라미터 우선 확인
+            org_id = request.query_params.get("org_id") or request.query_params.get("org_uuid")
+            if org_id:
+                logger.debug(f"📋 쿼리에서 조직 ID/UUID 추출: {org_id}")
+                return await self._get_organization_by_id_or_uuid(org_id)
+            
+            # org_code 쿼리 파라미터 확인
             org_code = request.query_params.get("org_code")
             if org_code:
+                logger.debug(f"📋 쿼리에서 조직 코드 추출: {org_code}")
                 return await self._get_organization_by_code(org_code)
-            
-            # org_id, org_uuid 쿼리 파라미터 확인
-            org_id = request.query_params.get("org_id")
-            org_uuid = request.query_params.get("org_uuid")
-            
-            if org_id or org_uuid:
-                return await self._get_organization_by_id_or_uuid(org_id, org_uuid)
             
             return None
             
@@ -497,20 +502,19 @@ class TenantMiddleware(BaseHTTPMiddleware):
             logger.error(f"❌ 조직 코드 조회 오류: {str(e)}")
             return None
     
-    async def _get_organization_by_id_or_uuid(self, org_id: Optional[str], org_uuid: Optional[str]) -> Optional[Dict[str, Any]]:
+    async def _get_organization_by_id_or_uuid(self, org_id: Optional[str]) -> Optional[Dict[str, Any]]:
         """
         ID 또는 UUID로 조직 정보 조회 (캐싱 적용)
         
         Args:
             org_id: 조직 ID
-            org_uuid: 조직 UUID
             
         Returns:
             조직 정보 또는 None
         """
         try:
             # 캐시 키 생성
-            cache_key = f"org_id_uuid:{org_uuid or org_id}"
+            cache_key = f"org_id_uuid:{org_id}"
             
             # 만료된 캐시 정리
             self._clear_expired_cache()
@@ -528,22 +532,24 @@ class TenantMiddleware(BaseHTTPMiddleware):
             db: Session = next(db_gen)
             
             try:
-                query = db.query(Organization)
-                if org_uuid:
-                    query = query.filter(Organization.org_id == org_uuid)
-                elif org_id:
-                    query = query.filter(Organization.org_id == org_id)
-                else:
+                if not org_id:
+                    logger.warning("❌ org_id가 None 또는 빈 값입니다")
                     return None
                 
-                org = query.filter(Organization.deleted_at.is_(None)).first()
+                query = db.query(Organization)
+                query = query.filter(Organization.org_id == org_id)
+                query = query.filter(Organization.deleted_at.is_(None))
+                
+                org = query.first()
                 if org:
                     org_info = self._organization_to_dict(org)
                     # 캐시에 저장
                     self._set_cache(cache_key, org_info)
+                    logger.debug(f"✅ 조직 정보 조회 성공: {org_info.get('name', 'Unknown')} ({org_id})")
                     return org_info
-                
-                return None
+                else:
+                    logger.warning(f"❌ 조직을 찾을 수 없음: {org_id}")
+                    return None
                 
             finally:
                 db.close()
