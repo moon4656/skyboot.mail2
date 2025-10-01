@@ -219,17 +219,27 @@ async def get_organization(
     시스템 관리자는 모든 조직을 조회할 수 있습니다.
     """
     try:
-        logger.info(f"🏢 조직 정보 조회 - ID: {org_id}, 사용자: {current_user.email}")
+        logger.info(f"🏢 조직 정보 조회 - 요청 org_id: {org_id}")
+        logger.info(f"👤 사용자 정보 - 이메일: {current_user.email}, 역할: {current_user.role}")
+        logger.info(f"🏢 사용자 소속 조직 - user.org_id: {getattr(current_user, 'org_id', 'None')}")
+        logger.info(f"🔍 미들웨어에서 추출한 current_org: {current_org}")
         
         # 입력 검증: 빈 문자열 확인
         if not org_id or org_id.strip() == "":
+            logger.warning(f"⚠️ 빈 조직 ID 요청")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="조직을 찾을 수 없습니다."
             )
         
         # 권한 확인: 일반 사용자는 자신의 조직만 조회 가능
-        if current_user.role not in ["system_admin", "admin"] and org_id != current_org:
+        logger.info(f"🔐 권한 검증 - 사용자 역할: {current_user.role}, 요청 org_id: {org_id}, 현재 org: {current_org}")
+        
+        # current_org가 딕셔너리인 경우 'id' 키에서 조직 ID 추출
+        current_org_id = current_org.get('id') if isinstance(current_org, dict) else current_org
+        
+        if current_user.role not in ["system_admin", "admin"] and org_id != current_org_id:
+            logger.warning(f"❌ 권한 없음 - 사용자({current_user.email})가 다른 조직({org_id}) 접근 시도, 허용된 조직 ID: {current_org_id}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="다른 조직의 정보에 접근할 권한이 없습니다."
@@ -287,7 +297,8 @@ async def update_organization(
         logger.info(f"✏️ 조직 정보 수정 요청 - ID: {org_id}, 사용자: {current_user.email}")
         
         # 권한 확인: 조직 관리자 또는 시스템 관리자만 수정 가능
-        if current_user.role not in ["admin", "system_admin"] and org_id != current_org:
+        current_org_id = current_org.get('id') if isinstance(current_org, dict) else current_org
+        if current_user.role not in ["admin", "system_admin"] and org_id != current_org_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="조직 정보를 수정할 권한이 없습니다."
@@ -385,7 +396,8 @@ async def get_organization_stats(
         logger.info(f"📊 조직 통계 조회 - ID: {org_id}, 사용자: {current_user.email}")
         
         # 권한 확인: 조직 관리자 또는 시스템 관리자만 조회 가능
-        if current_user.role not in ["admin", "system_admin"] and org_id != current_org:
+        current_org_id = current_org.get('id') if isinstance(current_org, dict) else current_org
+        if current_user.role not in ["admin", "system_admin"] and org_id != current_org_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="조직 통계에 접근할 권한이 없습니다."
@@ -479,7 +491,8 @@ async def get_organization_settings(
         logger.info(f"⚙️ 조직 설정 조회 - ID: {org_id}, 사용자: {current_user.email}")
         
         # 권한 확인: 조직 관리자 또는 시스템 관리자만 조회 가능
-        if current_user.role not in ["admin", "system_admin"] and org_id != current_org:
+        current_org_id = current_org.get('id') if isinstance(current_org, dict) else current_org
+        if current_user.role not in ["admin", "system_admin"] and org_id != current_org_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="조직 설정에 접근할 권한이 없습니다."
@@ -540,7 +553,8 @@ async def update_organization_settings(
         logger.info(f"⚙️ 조직 설정 수정 요청 - ID: {org_id}, 사용자: {current_user.email}")
         
         # 권한 확인: 조직 관리자 또는 시스템 관리자만 수정 가능
-        if current_user.role not in ["admin", "system_admin"] and org_id != current_org:
+        current_org_id = current_org.get('id') if isinstance(current_org, dict) else current_org
+        if current_user.role not in ["admin", "system_admin"] and org_id != current_org_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="조직 설정을 수정할 권한이 없습니다."

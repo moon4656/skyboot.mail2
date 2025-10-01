@@ -2,6 +2,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Generator
+from contextlib import contextmanager
 import os
 from ..config import settings
 
@@ -44,6 +45,24 @@ def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
+    finally:
+        db.close()
+
+@contextmanager
+def get_db_session():
+    """
+    독립적인 데이터베이스 세션을 생성하고 반환합니다.
+    컨텍스트 매니저로 사용하여 자동으로 세션을 정리합니다.
+    
+    Yields:
+        Session: SQLAlchemy 데이터베이스 세션
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

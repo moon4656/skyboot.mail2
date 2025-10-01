@@ -13,6 +13,94 @@ import uuid
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["인증"])
 
+@router.post("/login", response_model=Token)
+async def login(
+    user_credentials: UserLogin, 
+    request: Request, 
+    db: Session = Depends(get_db)
+) -> Token:
+    """
+    로그인 엔드포인트
+    이메일과 비밀번호로 사용자를 인증하고 JWT 토큰을 반환합니다.
+    """
+    logger.info(f"🔐 로그인 시도 - 사용자 ID: {user_credentials.user_id}")
+    
+    # 클라이언트 정보 추출
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent", None)
+    
+    def safe_log_login_attempt(status: str, reason: str = None, user_uuid: str = None):
+        """
+        안전한 로그인 로그 기록 함수
+        트랜잭션 롤백 상태에서도 안전하게 로그를 기록합니다.
+        """
+        try:
+            # 새로운 세션을 생성하여 독립적으로 로그 기록
+            from ..database.user import get_db_session
+            with get_db_session() as log_db:
+                login_log = LoginLog(
+                    user_uuid=user_uuid,
+                    email=user_credentials.email,
+                    ip_address=client_ip,
+                    user_agent=user_agent,
+                    login_status=status,
+                    failure_reason=reason
+                )
+                log_db.add(login_log)
+                log_db.commit()
+                logger.debug(f"📝 로그인 로그 기록 완료 - 상태: {status}")
+        except Exception as log_error:
+            # 로그 기록 실패는 메인 로직에 영향을 주지 않음
+            logger.warning(f"⚠️ 로그인 로그 기록 실패: {str(log_error)}")
+    
+    try:
+        # 사용자 인증 (조직 ID 없이)
+        auth_service = AuthService(db)
+        user = auth_service.authenticate_user(
+            user_credentials.user_id, user_credentials.password
+        )
+        if not user:
+            # 로그인 실패 로그 기록 (안전한 방식)
+            safe_log_login_attempt("failed", "Incorrect email or password")
+            
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # 토큰 생성 (create_tokens 메서드에서 리프레시 토큰 저장까지 처리됨)
+        tokens = auth_service.create_tokens(user)
+        
+        # 사용자 마지막 로그인 시간 업데이트
+        user.last_login_at = datetime.utcnow()
+        db.commit()
+        
+        # 로그인 성공 로그 기록 (안전한 방식)
+        safe_log_login_attempt("success", None, user.user_uuid)
+        
+        logger.info(f"✅ 로그인 성공 - 사용자: {user.user_id}, 조직: {user.org_id}")
+        
+        return {
+            "access_token": tokens["access_token"],
+            "refresh_token": tokens["refresh_token"],
+            "token_type": "bearer",
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+        }
+        
+    except HTTPException:
+        # HTTPException은 다시 발생시킴 (로그는 이미 기록됨)
+        raise
+    except Exception as e:
+        # 기타 예외 발생 시 로그 기록 (안전한 방식)
+        logger.error(f"❌ 로그인 시스템 오류 - 이메일: {user_credentials.email}, 오류: {str(e)}")
+        safe_log_login_attempt("failed", f"System error: {str(e)}")
+        
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     user_data: UserCreate, 
@@ -126,96 +214,6 @@ async def register(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during user registration"
-        )
-
-@router.post("/login", response_model=Token)
-async def login(
-    user_credentials: UserLogin, 
-    request: Request, 
-    db: Session = Depends(get_db)
-) -> Token:
-    """
-    로그인 엔드포인트
-    조직 내에서 사용자 인증을 수행합니다.
-    """
-    logger.info(f"🔐 로그인 시도 - 이메일: {user_credentials.email}")
-    
-    # 클라이언트 정보 추출
-    client_ip = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent", None)
-    
-    try:
-        # 사용자 인증 (조직 ID 없이)
-        auth_service = AuthService(db)
-        user = auth_service.authenticate_user(
-            user_credentials.email, user_credentials.password
-        )
-        if not user:
-            # 로그인 실패 로그 기록
-            login_log = LoginLog(
-                user_uuid=None,
-                email=user_credentials.email,
-                ip_address=client_ip,
-                user_agent=user_agent,
-                login_status="failed",
-                failure_reason="Incorrect email or password"
-            )
-            db.add(login_log)
-            db.commit()
-            
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        
-        # 토큰 생성 (create_tokens 메서드에서 리프레시 토큰 저장까지 처리됨)
-        tokens = auth_service.create_tokens(user)
-        
-        # 사용자 마지막 로그인 시간 업데이트
-        user.last_login_at = datetime.utcnow()
-        
-        # 로그인 성공 로그 기록
-        login_log = LoginLog(
-            user_uuid=user.user_uuid,
-            email=user_credentials.email,
-            ip_address=client_ip,
-            user_agent=user_agent,
-            login_status="success",
-            failure_reason=None
-        )
-        db.add(login_log)
-        db.commit()
-        
-        logger.info(f"✅ 로그인 성공 - 사용자: {user.user_id}, 조직: {user.org_id}")
-        
-        return {
-            "access_token": tokens["access_token"],
-            "refresh_token": tokens["refresh_token"],
-            "token_type": "bearer",
-            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-        }
-        
-    except HTTPException:
-        # HTTPException은 다시 발생시킴
-        raise
-    except Exception as e:
-        # 기타 예외 발생 시 로그 기록
-        logger.error(f"❌ 로그인 시스템 오류 - 이메일: {user_credentials.email}, 오류: {str(e)}")
-        login_log = LoginLog(
-            user_uuid=None,
-            email=user_credentials.email,
-            ip_address=client_ip,
-            user_agent=user_agent,
-            login_status="failed",
-            failure_reason=f"System error: {str(e)}"
-        )
-        db.add(login_log)
-        db.commit()
-        
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
         )
 
 @router.post("/refresh", response_model=AccessToken)

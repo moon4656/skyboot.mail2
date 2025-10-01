@@ -758,7 +758,9 @@ def get_current_org_id_from_context() -> Optional[str]:
     """
     org = current_org_context.get()
     if org:
-        return str(org.get('id', ''))
+        # 조직 정보에서 ID 추출 (id 또는 org_id 키 모두 지원)
+        org_id = org.get('id') or org.get('org_id')
+        return str(org_id) if org_id else None
     return None
 
 

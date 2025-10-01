@@ -33,7 +33,7 @@ class UserResponse(BaseModel):
 
 class UserLogin(BaseModel):
     """사용자 로그인 스키마"""
-    email: str = Field(..., description="이메일 주소")
+    user_id: str = Field(..., description="사용자 ID")
     password: str = Field(..., description="비밀번호")
 
 class Token(BaseModel):
