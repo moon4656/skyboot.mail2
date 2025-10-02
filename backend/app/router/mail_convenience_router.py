@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 라우터 초기화 - 편의 기능
-router = APIRouter(tags=["mail-convenience"])
+router = APIRouter()
 
 
 @router.post("/search", response_model=MailSearchResponse, summary="메일 검색")

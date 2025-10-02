@@ -37,7 +37,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 라우터 초기화 - 필수 기능
-router = APIRouter(tags=["메일 핵심 기능"])
+router = APIRouter()
 
 # 보안 설정
 security = HTTPBearer()

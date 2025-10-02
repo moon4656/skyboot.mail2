@@ -19,7 +19,7 @@ from ..service.auth_service import get_current_user as auth_get_current_user, ge
 logger = logging.getLogger(__name__)
 
 # 라우터 초기화
-router = APIRouter(tags=["사용자 관리"])
+router = APIRouter()
 
 
 @router.post("/", response_model=UserResponse, summary="사용자 생성")

@@ -66,7 +66,9 @@ class OrganizationBase(BaseModel):
             'backup_retention_days',
             'notification_settings',
             'security_settings',
-            'feature_flags'
+            'feature_flags',
+            'features',  # 추가된 키
+            'theme'      # 추가된 키
         }
         
         for key in v.keys():

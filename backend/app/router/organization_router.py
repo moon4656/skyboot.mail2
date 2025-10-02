@@ -26,10 +26,12 @@ from ..middleware.tenant_middleware import get_current_org, get_current_org_id_f
 logger = logging.getLogger(__name__)
 
 # 라우터 생성
-router = APIRouter(
-    tags=["organizations"],
-    responses={404: {"description": "조직을 찾을 수 없습니다"}}
-)
+# router = APIRouter(
+#     tags=["organizations"],
+#     responses={404: {"description": "조직을 찾을 수 없습니다"}}
+# )
+
+router = APIRouter()
 
 
 @router.post(
@@ -176,7 +178,19 @@ async def get_current_organization(
     try:
         logger.info(f"🏢 현재 조직 정보 조회 - 사용자: {current_user.email}, 조직: {current_org}")
         
-        organization = await org_service.get_organization_by_id(current_org)
+        # current_org가 "current"이거나 비어있는 경우 사용자의 org_id 사용
+        if current_org == "current" or not current_org:
+            if not current_user.org_id:
+                logger.error(f"❌ 사용자 {current_user.email}에게 조직이 할당되지 않았습니다.")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="사용자에게 조직이 할당되지 않았습니다."
+                )
+            org_id = current_user.org_id
+        else:
+            org_id = current_org
+        
+        organization = await org_service.get_organization_by_id(org_id)
         
         if not organization:
             raise HTTPException(
@@ -204,7 +218,7 @@ async def get_current_organization(
     description="특정 조직의 정보를 조회합니다."
 )
 async def get_organization(
-    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
+    org_id: str = Path(..., pattern=r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$", description="조직 ID (UUID 형식)"),
     current_user: User = Depends(get_current_user),
     current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
@@ -274,7 +288,7 @@ async def get_organization(
 )
 async def update_organization(
     org_update: OrganizationUpdate,
-    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
+    org_id: str = Path(..., pattern=r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$", description="조직 ID (UUID 형식)"),
     current_user: User = Depends(get_current_user),
     current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
@@ -332,7 +346,7 @@ async def update_organization(
     description="조직을 삭제합니다. (시스템 관리자 권한 필요)"
 )
 async def delete_organization(
-    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
+    org_id: str = Path(..., pattern=r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$", description="조직 ID (UUID 형식)"),
     force: bool = Query(False, description="강제 삭제 여부 (하드 삭제)"),
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db),
@@ -372,13 +386,80 @@ async def delete_organization(
 
 
 @router.get(
+    "/current/stats",
+    response_model=OrganizationStatsResponse,
+    summary="현재 조직 통계 조회",
+    description="현재 사용자가 속한 조직의 통계 정보를 조회합니다."
+)
+async def get_current_organization_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    org_service: OrganizationService = Depends(get_organization_service)
+):
+    """
+    현재 조직 통계 정보 조회
+    
+    현재 사용자가 속한 조직의 사용량, 메일 통계 등의 상세 정보를 반환합니다.
+    """
+    try:
+        logger.info(f"📊 현재 조직 통계 조회 - 사용자: {current_user.email}")
+        logger.info(f"🔍 디버그 - current_user.org_id: {getattr(current_user, 'org_id', 'None')}")
+        
+        # 사용자의 조직 ID 사용
+        if not hasattr(current_user, 'org_id') or not current_user.org_id:
+            logger.error(f"❌ 사용자 {current_user.email}에게 조직이 할당되지 않았습니다.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자에게 조직이 할당되지 않았습니다."
+            )
+        
+        org_id = current_user.org_id
+        logger.info(f"🔄 사용자 org_id 사용: {org_id}")
+        
+        logger.info(f"📊 조직 통계 조회 시작 - 실제 조직 ID: {org_id}")
+        
+        # 조직 정보와 통계를 별도로 조회
+        org_info = await org_service.get_organization_by_id(org_id)
+        if not org_info:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="조직을 찾을 수 없습니다."
+            )
+        
+        stats = await org_service.get_organization_stats(org_id)
+        if not stats:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="조직 통계를 찾을 수 없습니다."
+            )
+        
+        # OrganizationStatsResponse 객체 생성
+        result = OrganizationStatsResponse(
+            organization=org_info,
+            stats=stats
+        )
+        
+        logger.info(f"✅ 현재 조직 통계 조회 완료 - 조직: {org_info.name}")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 현재 조직 통계 조회 오류: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="조직 통계 조회 중 오류가 발생했습니다."
+        )
+
+
+@router.get(
     "/{org_id}/stats",
     response_model=OrganizationStatsResponse,
     summary="조직 통계 조회",
     description="조직의 사용량 및 통계 정보를 조회합니다."
 )
 async def get_organization_stats(
-    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
+    org_id: str = Path(..., pattern=r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$", description="조직 ID (UUID 형식)"),
     current_user: User = Depends(get_current_user),
     current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
@@ -424,48 +505,92 @@ async def get_organization_stats(
         )
 
 
+# 현재 조직 설정 조회 (구체적인 경로를 먼저 배치)
 @router.get(
-    "/current/stats",
-    response_model=OrganizationStatsResponse,
-    summary="현재 조직 통계 조회",
-    description="현재 사용자가 속한 조직의 통계 정보를 조회합니다."
+    "/current/settings",
+    response_model=OrganizationSettingsResponse,
+    summary="현재 조직 설정 조회",
+    description="현재 사용자가 속한 조직의 설정 정보를 조회합니다."
 )
-async def get_current_organization_stats(
+async def get_current_organization_settings(
     current_user: User = Depends(get_current_user),
-    current_org: str = Depends(get_current_org_id_from_context),
     db: Session = Depends(get_db),
     org_service: OrganizationService = Depends(get_organization_service)
 ):
     """
-    현재 조직 통계 정보 조회
+    현재 조직 설정 조회
     
-    현재 사용자가 속한 조직의 사용량, 메일 통계 등의 상세 정보를 반환합니다.
+    현재 사용자가 속한 조직의 메일 설정, 보안 설정 등을 조회합니다.
     """
     try:
-        logger.info(f"📊 현재 조직 통계 조회 - 사용자: {current_user.email}, 조직: {current_org}")
+        logger.info(f"⚙️ 현재 조직 설정 조회 - 사용자: {current_user.email}")
+        logger.info(f"🔍 디버그 - current_user.org_id: {getattr(current_user, 'org_id', 'None')}")
         
-        stats = await org_service.get_detailed_organization_stats(current_org)
+        # 사용자의 조직 ID 사용
+        if not hasattr(current_user, 'org_id') or not current_user.org_id:
+            logger.error(f"❌ 사용자 {current_user.email}에게 조직이 할당되지 않았습니다.")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="사용자에게 조직이 할당되지 않았습니다."
+            )
         
-        if not stats:
+        org_id = current_user.org_id
+        logger.info(f"🔄 사용자 org_id 사용: {org_id}")
+            
+        logger.info(f"⚙️ 조직 설정 조회 시작 - 실제 조직 ID: {org_id}")
+        
+        # 조직 정보 조회
+        org_info = await org_service.get_organization_by_id(org_id)
+        if not org_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="조직을 찾을 수 없습니다."
             )
         
-        logger.info(f"✅ 현재 조직 통계 조회 완료 - 조직: {current_org}")
-        return stats
+        # 기본 설정 생성
+        from ..schemas.organization_schema import OrganizationSettings
+        settings = OrganizationSettings()
+        
+        # 조직의 settings에서 값이 있으면 덮어쓰기 (org_info.settings는 딕셔너리)
+        if org_info.settings:
+            for key, value in org_info.settings.items():
+                if hasattr(settings, key):
+                    # 타입 변환 처리
+                    if key in ['mail_retention_days', 'max_attachment_size_mb', 'backup_retention_days']:
+                        try:
+                            setattr(settings, key, int(value))
+                        except (ValueError, TypeError):
+                            pass  # 기본값 유지
+                    elif key in ['spam_filter_enabled', 'virus_scan_enabled', 'mail_encryption_enabled', 
+                               'backup_enabled', 'email_notifications', 'sms_notifications', 
+                               'two_factor_auth', 'ip_whitelist_enabled', 'webmail_enabled', 
+                               'mobile_app_enabled', 'api_access_enabled']:
+                        try:
+                            setattr(settings, key, str(value).lower() in ['true', '1', 'yes', 'on'])
+                        except (ValueError, TypeError):
+                            pass  # 기본값 유지
+                    else:
+                        setattr(settings, key, value)
+        
+        result = OrganizationSettingsResponse(
+            organization=org_info,
+            settings=settings
+        )
+        
+        logger.info(f"✅ 현재 조직 설정 조회 완료 - 조직: {org_info.name}")
+        return result
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 현재 조직 통계 조회 오류: {str(e)}")
+        logger.error(f"❌ 현재 조직 설정 조회 오류: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="조직 통계 조회 중 오류가 발생했습니다."
+            detail="조직 설정 조회 중 오류가 발생했습니다."
         )
 
 
-# 조직 설정 관리
+# 조직 설정 관리 (일반적인 경로)
 @router.get(
     "/{org_id}/settings",
     response_model=OrganizationSettingsResponse,
@@ -473,7 +598,7 @@ async def get_current_organization_stats(
     description="조직의 설정 정보를 조회합니다."
 )
 async def get_organization_settings(
-    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
+    org_id: str = Path(..., pattern=r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$", description="조직 ID (UUID 형식)"),
     current_user: User = Depends(get_current_user),
     current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
@@ -527,7 +652,7 @@ async def get_organization_settings(
 )
 async def update_organization_settings(
     settings_update: OrganizationSettingsUpdate,
-    org_id: str = Path(..., pattern=r"^[A-Za-z0-9_-]+$", min_length=1, max_length=50, description="조직 ID (영숫자, 언더스코어, 하이픈만 허용)"),
+    org_id: str = Path(..., pattern=r"^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$", description="조직 ID (UUID 형식)"),
     current_user: User = Depends(get_current_user),
     current_org: str = Depends(require_org),
     db: Session = Depends(get_db),
@@ -578,45 +703,4 @@ async def update_organization_settings(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="조직 설정 수정 중 오류가 발생했습니다."
-        )
-
-
-@router.get(
-    "/current/settings",
-    response_model=OrganizationSettingsResponse,
-    summary="현재 조직 설정 조회",
-    description="현재 사용자가 속한 조직의 설정 정보를 조회합니다."
-)
-async def get_current_organization_settings(
-    current_user: User = Depends(get_current_user),
-    current_org: str = Depends(get_current_org_id_from_context),
-    db: Session = Depends(get_db),
-    org_service: OrganizationService = Depends(get_organization_service)
-):
-    """
-    현재 조직 설정 조회
-    
-    현재 사용자가 속한 조직의 메일 설정, 보안 설정 등을 조회합니다.
-    """
-    try:
-        logger.info(f"⚙️ 현재 조직 설정 조회 - 사용자: {current_user.email}, 조직: {current_org}")
-        
-        settings = await org_service.get_organization_settings(current_org)
-        
-        if not settings:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="조직 설정을 찾을 수 없습니다."
-            )
-        
-        logger.info(f"✅ 현재 조직 설정 조회 완료 - 조직: {current_org}")
-        return settings
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ 현재 조직 설정 조회 오류: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="조직 설정 조회 중 오류가 발생했습니다."
         )

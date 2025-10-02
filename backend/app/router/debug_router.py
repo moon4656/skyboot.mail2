@@ -45,7 +45,6 @@ logger = logging.getLogger(__name__)
 # 라우터 생성
 router = APIRouter(
     prefix="/debug",
-    tags=["debug"],
     responses={404: {"description": "디버그 정보를 찾을 수 없습니다"}}
 )
 

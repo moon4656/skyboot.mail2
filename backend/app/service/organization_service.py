@@ -5,16 +5,17 @@ SaaS 다중 조직 지원을 위한 조직 관리 기능
 """
 import logging
 import uuid
+import traceback
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from fastapi import HTTPException, Depends
 
-from ..model import Organization, User, MailUser
+from ..model import Organization, User, MailUser, OrganizationSettings
 from ..schemas.organization_schema import (
     OrganizationCreate, OrganizationUpdate, OrganizationResponse,
-    OrganizationSettings, OrganizationStats
+    OrganizationSettings as OrganizationSettingsSchema, OrganizationStats
 )
 from ..service.auth_service import get_password_hash
 from ..config import settings
@@ -162,6 +163,31 @@ class OrganizationService:
             
             logger.info(f"🎉 조직 '{new_org.name}' 생성 및 초기화 완료")
             
+            # 설정을 딕셔너리로 변환 (핵심 조직 필드 제외)
+            settings_dict = {}
+            # 핵심 조직 필드들 (settings에서 제외해야 할 키들)
+            core_org_fields = {
+                'max_users', 'max_storage_gb', 'timezone', 'name', 'domain', 
+                'description', 'is_active', 'org_id', 'org_code', 'subdomain',
+                'admin_email', 'created_at', 'updated_at'
+            }
+            
+            if hasattr(new_org, 'settings') and new_org.settings:
+                # org.settings가 리스트인 경우 (OrganizationSettings 객체들)
+                if isinstance(new_org.settings, list):
+                    for setting in new_org.settings:
+                        if setting.setting_key not in core_org_fields:
+                            settings_dict[setting.setting_key] = setting.setting_value
+                # org.settings가 단일 객체인 경우
+                elif hasattr(new_org.settings, 'setting_key'):
+                    if new_org.settings.setting_key not in core_org_fields:
+                        settings_dict[new_org.settings.setting_key] = new_org.settings.setting_value
+                # org.settings가 이미 딕셔너리인 경우
+                elif isinstance(new_org.settings, dict):
+                    for key, value in new_org.settings.items():
+                        if key not in core_org_fields:
+                            settings_dict[key] = value
+            
             return OrganizationResponse(
                 org_id=new_org.org_id,
                 org_code=new_org.org_code,
@@ -173,6 +199,7 @@ class OrganizationService:
                 is_active=new_org.is_active,
                 max_users=new_org.max_users,
                 max_storage_gb=new_org.max_storage_gb,
+                settings=settings_dict,
                 created_at=new_org.created_at,
                 updated_at=new_org.updated_at
             )
@@ -199,27 +226,41 @@ class OrganizationService:
             조직 정보 또는 None
         """
         try:
+            logger.info(f"🔍 get_organization 호출 - org_id: {org_id}, 타입: {type(org_id)}")
             org = self.db.query(Organization).filter(
                 Organization.org_id == org_id,
                 Organization.is_active == True
             ).first()
             
+            logger.info(f"🔍 get_organization 쿼리 결과 - org: {org is not None}")
             if not org:
+                logger.warning(f"⚠️ get_organization - 조직을 찾을 수 없음: {org_id}")
                 return None
             
-            # 설정을 딕셔너리로 변환
+            # 설정을 딕셔너리로 변환 (핵심 조직 필드 제외)
             settings_dict = {}
+            # 핵심 조직 필드들 (settings에서 제외해야 할 키들)
+            core_org_fields = {
+                'max_users', 'max_storage_gb', 'timezone', 'name', 'domain', 
+                'description', 'is_active', 'org_id', 'org_code', 'subdomain',
+                'admin_email', 'created_at', 'updated_at'
+            }
+            
             if hasattr(org, 'settings') and org.settings:
                 # org.settings가 리스트인 경우 (OrganizationSettings 객체들)
                 if isinstance(org.settings, list):
                     for setting in org.settings:
-                        settings_dict[setting.setting_key] = setting.setting_value
+                        if setting.setting_key not in core_org_fields:
+                            settings_dict[setting.setting_key] = setting.setting_value
                 # org.settings가 단일 객체인 경우
                 elif hasattr(org.settings, 'setting_key'):
-                    settings_dict[org.settings.setting_key] = org.settings.setting_value
+                    if org.settings.setting_key not in core_org_fields:
+                        settings_dict[org.settings.setting_key] = org.settings.setting_value
                 # org.settings가 이미 딕셔너리인 경우
                 elif isinstance(org.settings, dict):
-                    settings_dict = org.settings
+                    for key, value in org.settings.items():
+                        if key not in core_org_fields:
+                            settings_dict[key] = value
             
             return OrganizationResponse(
                 org_id=org.org_id,
@@ -252,13 +293,48 @@ class OrganizationService:
             조직 정보 또는 None
         """
         try:
+            logger.info(f"🔍 get_organization_by_id 호출 - org_id: {org_id}, 타입: {type(org_id)}")
+            
+            # 모든 조직 조회해서 디버그
+            all_orgs = self.db.query(Organization).all()
+            logger.info(f"🔍 전체 조직 수: {len(all_orgs)}")
+            for org in all_orgs:
+                logger.info(f"🔍 조직 정보 - org_id: {org.org_id}, name: {org.name}, is_active: {org.is_active}")
+            
             org = self.db.query(Organization).filter(
                 Organization.org_id == org_id,
                 Organization.is_active == True
             ).first()
             
+            logger.info(f"🔍 get_organization_by_id 쿼리 결과 - org: {org is not None}")
             if not org:
+                logger.warning(f"⚠️ get_organization_by_id - 조직을 찾을 수 없음: {org_id}")
                 return None
+            
+            # 설정을 딕셔너리로 변환 (핵심 조직 필드 제외)
+            settings_dict = {}
+            # 핵심 조직 필드들 (settings에서 제외해야 할 키들)
+            core_org_fields = {
+                'max_users', 'max_storage_gb', 'timezone', 'name', 'domain', 
+                'description', 'is_active', 'org_id', 'org_code', 'subdomain',
+                'admin_email', 'created_at', 'updated_at'
+            }
+            
+            if hasattr(org, 'settings') and org.settings:
+                # org.settings가 리스트인 경우 (OrganizationSettings 객체들)
+                if isinstance(org.settings, list):
+                    for setting in org.settings:
+                        if setting.setting_key not in core_org_fields:
+                            settings_dict[setting.setting_key] = setting.setting_value
+                # org.settings가 단일 객체인 경우
+                elif hasattr(org.settings, 'setting_key'):
+                    if org.settings.setting_key not in core_org_fields:
+                        settings_dict[org.settings.setting_key] = org.settings.setting_value
+                # org.settings가 이미 딕셔너리인 경우
+                elif isinstance(org.settings, dict):
+                    for key, value in org.settings.items():
+                        if key not in core_org_fields:
+                            settings_dict[key] = value
             
             return OrganizationResponse(
                 org_id=org.org_id,
@@ -271,6 +347,7 @@ class OrganizationService:
                 is_active=org.is_active,
                 max_users=org.max_users,
                 max_storage_gb=org.max_storage_gb,
+                settings=settings_dict,
                 created_at=org.created_at,
                 updated_at=org.updated_at
             )
@@ -317,8 +394,23 @@ class OrganizationService:
             # 정렬 및 페이지네이션 (인덱스 활용을 위해 org_id 기준 정렬로 변경)
             orgs = query.order_by(Organization.org_code.desc()).offset(skip).limit(limit).all()
             
-            return [
-                OrganizationResponse(
+            result = []
+            for org in orgs:
+                # 설정을 딕셔너리로 변환
+                settings_dict = {}
+                if hasattr(org, 'settings') and org.settings:
+                    # org.settings가 리스트인 경우 (OrganizationSettings 객체들)
+                    if isinstance(org.settings, list):
+                        for setting in org.settings:
+                            settings_dict[setting.setting_key] = setting.setting_value
+                    # org.settings가 단일 객체인 경우
+                    elif hasattr(org.settings, 'setting_key'):
+                        settings_dict[org.settings.setting_key] = org.settings.setting_value
+                    # org.settings가 이미 딕셔너리인 경우
+                    elif isinstance(org.settings, dict):
+                        settings_dict = org.settings
+                
+                result.append(OrganizationResponse(
                     org_id=org.org_id,
                     org_code=org.org_code,
                     subdomain=org.subdomain,
@@ -329,11 +421,12 @@ class OrganizationService:
                     is_active=org.is_active,
                     max_users=org.max_users,
                     max_storage_gb=org.max_storage_gb,
+                    settings=settings_dict,
                     created_at=org.created_at,
                     updated_at=org.updated_at
-                )
-                for org in orgs
-            ]
+                ))
+            
+            return result
             
         except Exception as e:
             logger.error(f"❌ 조직 목록 조회 오류: {str(e)}")
@@ -376,15 +469,48 @@ class OrganizationService:
                 # 이미 딕셔너리인 경우
                 update_data = org_data
             
+            # settings는 relationship이므로 제외하고 처리
+            settings_data = update_data.pop('settings', None)
+            
+            # 기본 필드 업데이트
             for field, value in update_data.items():
-                if hasattr(org, field):
+                if hasattr(org, field) and field != 'settings':
                     setattr(org, field, value)
+            
+            # settings가 있는 경우 별도 처리
+            if settings_data is not None:
+                await self.update_organization_settings(org_id, settings_data)
             
             org.updated_at = datetime.now(timezone.utc)
             
             self.db.commit()
             
             logger.info(f"✅ 조직 수정 완료: {org.name} (ID: {org.org_id})")
+            
+            # 설정을 딕셔너리로 변환 (핵심 조직 필드 제외)
+            settings_dict = {}
+            # 핵심 조직 필드들 (settings에서 제외해야 할 키들)
+            core_org_fields = {
+                'max_users', 'max_storage_gb', 'timezone', 'name', 'domain', 
+                'description', 'is_active', 'org_id', 'org_code', 'subdomain',
+                'admin_email', 'created_at', 'updated_at'
+            }
+            
+            if hasattr(org, 'settings') and org.settings:
+                # org.settings가 리스트인 경우 (OrganizationSettings 객체들)
+                if isinstance(org.settings, list):
+                    for setting in org.settings:
+                        if setting.setting_key not in core_org_fields:
+                            settings_dict[setting.setting_key] = setting.setting_value
+                # org.settings가 단일 객체인 경우
+                elif hasattr(org.settings, 'setting_key'):
+                    if org.settings.setting_key not in core_org_fields:
+                        settings_dict[org.settings.setting_key] = org.settings.setting_value
+                # org.settings가 이미 딕셔너리인 경우
+                elif isinstance(org.settings, dict):
+                    for key, value in org.settings.items():
+                        if key not in core_org_fields:
+                            settings_dict[key] = value
             
             return OrganizationResponse(
                 org_id=org.org_id,
@@ -397,6 +523,7 @@ class OrganizationService:
                 is_active=org.is_active,
                 max_users=org.max_users,
                 max_storage_gb=org.max_storage_gb,
+                settings=settings_dict,
                 created_at=org.created_at,
                 updated_at=org.updated_at
             )
@@ -458,6 +585,7 @@ class OrganizationService:
                 logger.info(f"🔒 조직 소프트 삭제: {org.name} (ID: {org.org_id})")
                 org.is_active = False
                 org.updated_at = datetime.now(timezone.utc)
+                org.deleted_at = datetime.now(timezone.utc)
             
             self.db.commit()
             
@@ -486,13 +614,21 @@ class OrganizationService:
             조직 통계 정보 또는 None
         """
         try:
+            logger.info(f"🔍 조직 조회 시작 - org_id: {org_id}")
+            
             org = self.db.query(Organization).filter(
                 Organization.org_id == org_id,
                 Organization.is_active == True
             ).first()
             
             if not org:
+                logger.warning(f"⚠️ 조직을 찾을 수 없음 - org_id: {org_id}")
+                # 모든 조직 목록 확인 (디버깅용)
+                all_orgs = self.db.query(Organization).all()
+                logger.info(f"📋 전체 조직 목록: {[org.org_id for org in all_orgs]}")
                 return None
+            
+            logger.info(f"✅ 조직 조회 성공 - org_id: {org_id}, name: {org.name}")
             
             # 사용자 수 조회
             total_users = self.db.query(User).filter(User.org_id == org_id).count()
@@ -574,7 +710,7 @@ class OrganizationService:
         """
         try:
             # 조직 정보 조회
-            org_response = await self.get_organization(org_id)
+            org_response = await self.get_organization_by_id(org_id)
             if not org_response:
                 return None
             
@@ -603,54 +739,61 @@ class OrganizationService:
         Returns:
             조직 설정 정보 (OrganizationSettingsResponse 형태)
         """
+        import json
+        
         try:
             # 조직 정보 조회
-            org_response = await self.get_organization(org_id)
+            org_response = await self.get_organization_by_id(org_id)
             if not org_response:
                 return None
             
-            # 설정 정보는 조직의 settings 필드에서 가져오거나 기본값 사용
-            from ..schemas.organization_schema import OrganizationSettings, OrganizationSettingsResponse
+            # 설정 정보는 OrganizationSettings 테이블에서 가져오거나 기본값 사용
+            from ..schemas.organization_schema import OrganizationSettingsResponse
             
-            org = self.db.query(Organization).filter(
-                Organization.org_id == org_id,
-                Organization.is_active == True
-            ).first()
+            # OrganizationSettings 테이블에서 설정 조회 (모델 사용)
+            org_settings = self.db.query(OrganizationSettings).filter(
+                OrganizationSettings.org_id == org_id
+            ).all()
             
-            if not org:
-                return None
-            
-            # 기본 설정 생성
-            settings = OrganizationSettings()
-            
-            # 조직의 settings에서 값이 있으면 덮어쓰기
-            if org.settings:
-                # org.settings는 OrganizationSettings 객체들의 리스트
-                settings_dict = {}
-                if isinstance(org.settings, list):
-                    for setting in org.settings:
-                        if hasattr(setting, 'setting_key') and hasattr(setting, 'setting_value'):
-                            settings_dict[setting.setting_key] = setting.setting_value
+            # 설정 딕셔너리 생성
+            settings_dict = {}
+            for setting in org_settings:
+                setting_key = setting.setting_key
+                setting_value = setting.setting_value
+                setting_type = setting.setting_type
                 
-                # 딕셔너리의 값들을 OrganizationSettings 객체의 속성으로 설정
+                # 타입에 따라 값 변환
+                try:
+                    if setting_type == "json":
+                        settings_dict[setting_key] = json.loads(setting_value)
+                    elif setting_type == "boolean":
+                        settings_dict[setting_key] = setting_value.lower() in ['true', '1', 'yes', 'on']
+                    elif setting_type == "integer":
+                        settings_dict[setting_key] = int(setting_value)
+                    elif setting_type == "float":
+                        settings_dict[setting_key] = float(setting_value)
+                    else:
+                        settings_dict[setting_key] = setting_value
+                except (ValueError, TypeError, json.JSONDecodeError) as e:
+                    logger.warning(f"⚠️ 설정 값 변환 오류 - {setting_key}: {setting_value}, 오류: {str(e)}")
+                    settings_dict[setting_key] = setting_value  # 원본 값 사용
+            
+            # 기본 설정과 데이터베이스 설정을 병합하여 OrganizationSettingsSchema 생성
+            try:
+                settings = OrganizationSettingsSchema(**settings_dict)
+            except Exception as e:
+                logger.warning(f"⚠️ 설정 스키마 생성 오류: {str(e)}, 기본 설정 사용")
+                settings = OrganizationSettingsSchema()
+                # 유효한 필드만 설정
                 for key, value in settings_dict.items():
                     if hasattr(settings, key):
-                        # 타입 변환 처리
-                        if key in ['mail_retention_days', 'max_attachment_size_mb', 'backup_retention_days']:
-                            try:
-                                setattr(settings, key, int(value))
-                            except (ValueError, TypeError):
-                                pass  # 기본값 유지
-                        elif key in ['spam_filter_enabled', 'virus_scan_enabled', 'mail_encryption_enabled', 
-                                   'backup_enabled', 'email_notifications', 'sms_notifications', 
-                                   'two_factor_auth', 'ip_whitelist_enabled', 'webmail_enabled', 
-                                   'mobile_app_enabled', 'api_access_enabled']:
-                            try:
-                                setattr(settings, key, str(value).lower() in ['true', '1', 'yes', 'on'])
-                            except (ValueError, TypeError):
-                                pass  # 기본값 유지
-                        else:
+                        try:
                             setattr(settings, key, value)
+                            logger.debug(f"🔧 설정 적용: {key} = {value}")
+                        except Exception as field_error:
+                            logger.warning(f"⚠️ 필드 설정 오류 - {key}: {str(field_error)}")
+            
+            logger.info(f"✅ 조직 설정 조회 완료: {org_id}, 설정 수: {len(settings_dict)}")
             
             return OrganizationSettingsResponse(
                 organization=org_response,
@@ -659,6 +802,7 @@ class OrganizationService:
             
         except Exception as e:
             logger.error(f"❌ 조직 설정 조회 오류: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
     async def update_organization_settings(self, org_id: str, settings_update):
@@ -672,6 +816,8 @@ class OrganizationService:
         Returns:
             수정된 설정 정보 (OrganizationSettingsResponse 형태)
         """
+        import json
+        
         try:
             org = self.db.query(Organization).filter(
                 Organization.org_id == org_id,
@@ -681,9 +827,6 @@ class OrganizationService:
             if not org:
                 return None
             
-            # 현재 설정 가져오기
-            current_settings = org.settings or {}
-            
             # 업데이트할 설정 적용 - Pydantic 모델인지 딕셔너리인지 확인
             if hasattr(settings_update, 'dict'):
                 # Pydantic 모델인 경우
@@ -691,13 +834,59 @@ class OrganizationService:
             else:
                 # 이미 딕셔너리인 경우
                 update_data = settings_update
-            current_settings.update(update_data)
             
-            # 설정 저장
-            org.settings = current_settings
+            logger.info(f"🔧 조직 설정 업데이트 데이터: {update_data}")
+            
+            # 각 설정을 OrganizationSettings 테이블에 저장/업데이트
+            for setting_key, setting_value in update_data.items():
+                # 기존 설정 찾기
+                existing_setting = self.db.query(OrganizationSettings).filter(
+                    OrganizationSettings.org_id == org_id,
+                    OrganizationSettings.setting_key == setting_key
+                ).first()
+                
+                # 값의 타입에 따라 적절히 변환
+                if isinstance(setting_value, (dict, list)):
+                    # JSON 타입의 경우 JSON 문자열로 변환
+                    setting_value_str = json.dumps(setting_value, ensure_ascii=False)
+                    setting_type = "json"
+                elif isinstance(setting_value, bool):
+                    setting_value_str = str(setting_value).lower()
+                    setting_type = "boolean"
+                elif isinstance(setting_value, int):
+                    setting_value_str = str(setting_value)
+                    setting_type = "integer"
+                elif isinstance(setting_value, float):
+                    setting_value_str = str(setting_value)
+                    setting_type = "float"
+                else:
+                    setting_value_str = str(setting_value)
+                    setting_type = "string"
+                
+                if existing_setting:
+                    # 기존 설정 업데이트
+                    existing_setting.setting_value = setting_value_str
+                    existing_setting.setting_type = setting_type
+                    existing_setting.updated_at = datetime.now(timezone.utc)
+                    logger.info(f"🔄 설정 업데이트: {setting_key} = {setting_value_str}")
+                else:
+                    # 새 설정 생성
+                    new_setting = OrganizationSettings(
+                        org_id=org_id,
+                        setting_key=setting_key,
+                        setting_value=setting_value_str,
+                        setting_type=setting_type,
+                        created_at=datetime.now(timezone.utc)
+                    )
+                    self.db.add(new_setting)
+                    logger.info(f"➕ 새 설정 생성: {setting_key} = {setting_value_str}")
+            
+            # 조직 업데이트 시간 갱신
             org.updated_at = datetime.now(timezone.utc)
             
             self.db.commit()
+            
+            logger.info(f"✅ 조직 설정 수정 완료: {org_id}")
             
             # 업데이트된 설정 반환
             return await self.get_organization_settings(org_id)

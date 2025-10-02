@@ -13,7 +13,7 @@ import logging
 import uuid
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["인증"])
+router = APIRouter()
 
 @router.post("/login", response_model=Token)
 async def login(

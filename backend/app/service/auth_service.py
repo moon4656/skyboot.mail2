@@ -523,7 +523,7 @@ def get_current_user(
         # 토큰 검증
         payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
-        org_id: int = payload.get("org_id")
+        org_id: str = payload.get("org_id")  # UUID 문자열로 수정
         
         if user_id is None or org_id is None:
             raise credentials_exception

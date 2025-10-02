@@ -32,6 +32,31 @@ _cache_timestamps: Dict[str, datetime] = {}
 CACHE_EXPIRY_MINUTES = 5  # 5분 캐시 유지
 
 
+def _convert_settings_to_dict(settings_list) -> Dict[str, Any]:
+    """
+    OrganizationSettings 리스트를 딕셔너리로 변환
+    
+    Args:
+        settings_list: OrganizationSettings 객체들의 리스트
+        
+    Returns:
+        설정 키-값 딕셔너리
+    """
+    if not settings_list:
+        return {}
+    
+    settings_dict = {}
+    try:
+        for setting in settings_list:
+            if hasattr(setting, 'setting_key') and hasattr(setting, 'setting_value'):
+                settings_dict[setting.setting_key] = setting.setting_value
+    except Exception as e:
+        logger.warning(f"⚠️ 설정 변환 오류: {str(e)}")
+        return {}
+    
+    return settings_dict
+
+
 class TenantMiddleware(BaseHTTPMiddleware):
     """
     통합 테넌트 미들웨어
@@ -737,7 +762,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 "status": getattr(org, 'status', 'active'),
                 "max_users": getattr(org, 'max_users', None),
                 "max_storage_gb": getattr(org, 'max_storage_gb', None),
-                "settings": getattr(org, 'settings', {}) or {}
+                "settings": _convert_settings_to_dict(getattr(org, 'settings', []))
             }
         except Exception as e:
             logger.error(f"❌ 조직 정보 변환 오류: {str(e)}")

@@ -123,7 +123,7 @@ class UserService:
             password_hash = AuthService.get_password_hash(user_data.password)
             
             new_user = User(
-                user_id=str(uuid.uuid4()),  # UUID로 ID 생성
+                user_id=user_data.user_id,  # UUID로 ID 생성
                 user_uuid=user_uuid,
                 org_id=org_id,
                 username=user_data.username,

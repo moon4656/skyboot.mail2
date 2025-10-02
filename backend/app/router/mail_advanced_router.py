@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 라우터 초기화 - 고급 기능
-router = APIRouter(tags=["mail-advanced"])
+router = APIRouter()
 
 # 백업 저장 디렉토리
 BACKUP_DIR = os.path.join(os.getcwd(), "backups")
