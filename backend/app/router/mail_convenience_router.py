@@ -628,11 +628,12 @@ async def mark_mail_as_read(
         
         # 로그 기록
         log_entry = MailLog(
-            mail_uuid=mail.mail_uuid,
-            user_uuid=mail_user.user_uuid,
             action="read",
             details=f"메일 읽음 처리: {mail.subject}",
-            created_at=datetime.utcnow()
+            mail_uuid=mail.mail_uuid,
+            user_uuid=mail_user.user_uuid,
+            ip_address=None,  # TODO: 실제 IP 주소 추가
+            user_agent=None   # TODO: 실제 User-Agent 추가
         )
         db.add(log_entry)
         db.commit()
@@ -710,7 +711,9 @@ async def mark_mail_as_unread(
             mail_uuid=mail.mail_uuid,
             user_uuid=current_user.user_uuid,
             action="unread",
-            timestamp=datetime.utcnow()
+            details=f"메일 읽지 않음 처리: {mail.subject}",
+            ip_address=None,  # TODO: 실제 IP 주소 추가
+            user_agent=None   # TODO: 실제 User-Agent 추가
         )
         db.add(log_entry)
         db.commit()

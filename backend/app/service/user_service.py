@@ -6,14 +6,14 @@ SaaS 다중 조직 지원을 위한 사용자 관리 기능
 import logging
 import uuid
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, or_, func, text
 from fastapi import HTTPException
 
 from ..model.user_model import User
 from ..model.mail_model import MailUser
-from ..model.organization_model import Organization
+from ..model.organization_model import Organization, OrganizationUsage
 from ..schemas.user_schema import (
     UserCreate, UserResponse, UserLogin
 )
@@ -147,6 +147,9 @@ class UserService:
                 email=user_data.email,
                 password_hash=password_hash
             )
+            
+            # 7. 조직 사용량 업데이트 (사용자 수 증가)
+            await self._update_organization_usage_users(org_id)
             
             self.db.commit()
             
@@ -368,11 +371,21 @@ class UserService:
             # 업데이트 가능한 필드들
             allowed_fields = ['username', 'full_name', 'is_active']
             
+            is_active_changed = False
+            old_is_active = user.is_active
+            
             for field, value in update_data.items():
                 if field in allowed_fields and hasattr(user, field):
+                    if field == 'is_active' and user.is_active != value:
+                        is_active_changed = True
                     setattr(user, field, value)
             
             user.updated_at = datetime.now(timezone.utc)
+            
+            # is_active 상태가 변경된 경우 조직 사용량 업데이트
+            if is_active_changed:
+                await self._update_organization_usage_users(user.org_id)
+                logger.info(f"📊 사용자 활성화 상태 변경: {user.email} ({old_is_active} → {user.is_active})")
             
             self.db.commit()
             self.db.refresh(user)
@@ -443,6 +456,9 @@ class UserService:
             if mail_user:
                 mail_user.is_active = False
                 mail_user.updated_at = datetime.now(timezone.utc)
+            
+            # 조직 사용량 업데이트 (사용자 수 감소)
+            await self._update_organization_usage_users(user.org_id)
             
             self.db.commit()
             
@@ -678,3 +694,60 @@ class UserService:
         
         logger.info(f"✅ 메일 사용자 생성: {email} (ID: {mail_user.user_id})")
         return mail_user
+
+    async def _update_organization_usage_users(self, org_id: str):
+        """
+        조직 사용량의 current_users 필드를 업데이트합니다.
+        
+        Args:
+            org_id: 조직 ID
+        """
+        try:
+            logger.info(f"📊 조직 사용량 업데이트 시작 - 조직: {org_id}")
+            
+            # 현재 활성 사용자 수 계산
+            active_user_count = self.db.query(func.count(User.user_id)).filter(
+                User.org_id == org_id,
+                User.is_active == True
+            ).scalar()
+            
+            logger.info(f"📈 조직 {org_id} 활성 사용자 수: {active_user_count}명")
+            
+            # 오늘 날짜의 organization_usage 레코드 확인
+            today = date.today()
+            usage_record = self.db.query(OrganizationUsage).filter(
+                OrganizationUsage.org_id == org_id,
+                func.date(OrganizationUsage.usage_date) == today
+            ).first()
+            
+            if usage_record:
+                # 기존 레코드 업데이트
+                old_count = usage_record.current_users
+                usage_record.current_users = active_user_count
+                usage_record.updated_at = datetime.now(timezone.utc)
+                
+                logger.info(f"✅ 조직 사용량 업데이트: {org_id} - {old_count}명 → {active_user_count}명")
+            else:
+                # 새 레코드 생성
+                new_usage = OrganizationUsage(
+                    org_id=org_id,
+                    usage_date=datetime.now(timezone.utc),
+                    current_users=active_user_count,
+                    emails_sent_today=0,
+                    total_emails_sent=0,
+                    current_storage_gb=0,
+                    emails_received_today=0,
+                    total_emails_received=0,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc)
+                )
+                
+                self.db.add(new_usage)
+                logger.info(f"➕ 조직 사용량 생성: {org_id} - {active_user_count}명")
+            
+            # 변경사항 저장 (별도 커밋하지 않고 현재 트랜잭션에 포함)
+            self.db.flush()
+            
+        except Exception as e:
+            logger.error(f"❌ 조직 사용량 업데이트 오류: {str(e)}")
+            # 조직 사용량 업데이트 실패가 주요 기능을 방해하지 않도록 예외를 다시 발생시키지 않음

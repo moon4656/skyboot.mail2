@@ -7,6 +7,8 @@ import logging
 import uuid
 import smtplib
 import os
+import asyncio
+import traceback
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
@@ -17,9 +19,18 @@ from email.mime.base import MIMEBase
 from email import encoders
 from fastapi import HTTPException
 
-from ..model import Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog, User, Organization
+from ..model import Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog, User, Organization, OrganizationUsage
+from ..model.mail_model import generate_mail_uuid
 from ..schemas.mail_schema import MailCreate, MailSendRequest, RecipientType, MailStatus, MailPriority
 from ..config import settings
+
+# Redis 락 관련 import (선택적)
+try:
+    from ..utils.redis_lock import OrganizationUsageLock, get_redis_client
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    logger.warning("⚠️ Redis 락 모듈을 사용할 수 없습니다. 기본 UPSERT 방식을 사용합니다.")
 
 # 로거 설정
 logger = logging.getLogger(__name__)
@@ -101,8 +112,12 @@ class MailService:
             if not sender_mail_user:
                 raise HTTPException(status_code=404, detail="메일 사용자를 찾을 수 없습니다.")
             
-            # 메일 ID 생성
-            mail_uuid = str(uuid.uuid4())
+            # 일일 메일 발송 제한 검증
+            await self._check_daily_email_limit(org_id, organization.max_emails_per_day, len(to_emails))
+            
+            # 메일 ID 생성 (년월일_시분초_uuid[12] 형식)
+            from ..model.mail_model import generate_mail_uuid
+            mail_uuid = generate_mail_uuid()
             
             # 메일 레코드 생성
             mail = Mail(
@@ -198,11 +213,12 @@ class MailService:
             
             # 메일 로그 기록
             mail_log = MailLog(
-                mail_uuid=mail_uuid,
                 action="send",
-                user_email=sender_mail_user.email,
-                details=f"메일 발송 완료 - 수신자: {len(all_recipients)}명",
-                created_at=datetime.now(timezone.utc)
+                details=f"메일 발송 완료 - 수신자: {len(all_recipients)}명, 발송자: {sender_mail_user.email}",
+                mail_uuid=mail_uuid,
+                user_uuid=sender_mail_user.user_uuid,
+                ip_address=None,  # TODO: 실제 요청에서 IP 주소 전달 필요
+                user_agent=None   # TODO: 실제 요청에서 User-Agent 전달 필요
             )
             self.db.add(mail_log)
             
@@ -215,6 +231,11 @@ class MailService:
                     user_uuid=sender_uuid
                 )
                 self.db.add(mail_in_folder)
+            
+            # 조직 사용량 업데이트
+            logger.info(f"🔍 조직 사용량 업데이트 호출 직전 - 조직: {org_id}, 수신자 수: {len(all_recipients)}")
+            await self._update_organization_usage(org_id, len(all_recipients))
+            logger.info(f"🔍 조직 사용량 업데이트 호출 완료 - 조직: {org_id}")
             
             self.db.commit()
             
@@ -263,17 +284,36 @@ class MailService:
             
             # 첨부파일 추가
             if attachments:
+                logger.info(f"📎 첨부파일 처리 시작 - 개수: {len(attachments)}")
                 for attachment in attachments:
                     if os.path.exists(attachment["file_path"]):
                         with open(attachment["file_path"], "rb") as f:
                             part = MIMEBase('application', 'octet-stream')
                             part.set_payload(f.read())
                             encoders.encode_base64(part)
-                            part.add_header(
-                                'Content-Disposition',
-                                f'attachment; filename= {attachment["filename"]}'
-                            )
+                            
+                            # 파일명을 안전하게 인코딩
+                            filename = attachment["filename"]
+                            try:
+                                # ASCII로 인코딩 가능한지 확인
+                                filename.encode('ascii')
+                                part.add_header(
+                                    'Content-Disposition',
+                                    f'attachment; filename="{filename}"'
+                                )
+                            except UnicodeEncodeError:
+                                # ASCII로 인코딩할 수 없으면 RFC 2231 방식 사용
+                                import urllib.parse
+                                encoded_filename = urllib.parse.quote(filename, safe='')
+                                part.add_header(
+                                    'Content-Disposition',
+                                    f'attachment; filename*=UTF-8\'\'{encoded_filename}'
+                                )
+                            
                             msg.attach(part)
+                        logger.info(f"📎 첨부파일 추가됨: {attachment['filename']}")
+                    else:
+                        logger.warning(f"⚠️ 첨부파일을 찾을 수 없음: {attachment['file_path']}")
             
             # SMTP 서버 연결 및 발송
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
@@ -317,87 +357,128 @@ class MailService:
             발송 결과 딕셔너리
         """
         import asyncio
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+        import urllib.parse
         
-        logger.info(f"🚀 send_email_smtp 메서드 호출됨 - 조직: {org_id}, 발송자: {sender_email}, 수신자: {len(recipient_emails)}명, 제목: {subject}")
-        logger.info(f"📧 SMTP 설정 - 서버: {self.smtp_server}:{self.smtp_port}, TLS: {self.use_tls}, 인증: {'있음' if self.smtp_username else '없음'}")
+        logger.info(f"🚀 send_email_smtp 메서드 호출됨 - 조직: {org_id}, 발송자: {sender_email}, 수신자: {len(recipient_emails)}명")
+        logger.info(f"📧 SMTP 설정 - 서버: {self.smtp_server}:{self.smtp_port}, TLS: {self.use_tls}")
+        
+        # 입력 파라미터 타입 로깅
+        logger.debug(f"📤 발송자 타입: {type(sender_email)}")
+        logger.debug(f"📤 수신자 목록 타입: {type(recipient_emails)}")
+        logger.debug(f"📤 제목 타입: {type(subject)}")
+        logger.debug(f"📤 텍스트 본문 타입: {type(body_text)}")
+        logger.debug(f"📤 HTML 본문 타입: {type(body_html)}")
+        logger.debug(f"📤 첨부파일 타입: {type(attachments)}")
+        logger.info(f"📤 첨부파일: {len(attachments) if attachments else 0}개")
+        
+        if attachments:
+            for i, attachment in enumerate(attachments):
+                logger.debug(f"📤 첨부파일 {i+1}: {attachment}")
+                if isinstance(attachment, dict):
+                    for key, value in attachment.items():
+                        logger.debug(f"📤 첨부파일 {i+1} {key}: {value} (타입: {type(value)})")
         
         def _send_smtp_sync():
             """동기 SMTP 발송 함수"""
             try:
                 logger.info(f"📤 SMTP 메일 발송 시작 - 발송자: {sender_email}, 수신자: {len(recipient_emails)}명")
                 
-                # MIME 메시지 생성
-                msg = MIMEMultipart('alternative')
+                # MIMEMultipart 메시지 생성
+                msg = MIMEMultipart()
                 msg['From'] = sender_email
                 msg['To'] = ', '.join(recipient_emails)
                 msg['Subject'] = subject
                 
                 # 텍스트 본문 추가
-                if body_text:
-                    text_part = MIMEText(body_text, 'plain', 'utf-8')
-                    msg.attach(text_part)
+                msg.attach(MIMEText(body_text, 'plain', 'utf-8'))
                 
-                # HTML 본문 추가
+                # HTML 본문 추가 (있는 경우)
                 if body_html:
-                    html_part = MIMEText(body_html, 'html', 'utf-8')
-                    msg.attach(html_part)
-                elif body_text:
-                    # HTML이 없으면 텍스트를 HTML로 변환
-                    html_content = body_text.replace('\n', '<br>')
-                    html_part = MIMEText(html_content, 'html', 'utf-8')
-                    msg.attach(html_part)
+                    msg.attach(MIMEText(body_html, 'html', 'utf-8'))
                 
-                # 첨부파일 추가
+                # 첨부파일 처리
                 if attachments:
-                    for attachment in attachments:
-                        if os.path.exists(attachment.get("file_path", "")):
-                            with open(attachment["file_path"], "rb") as f:
+                    logger.info(f"📎 첨부파일 처리 시작 - 개수: {len(attachments)}")
+                    for i, attachment in enumerate(attachments):
+                        logger.info(f"📎 첨부파일 {i+1} 처리 중...")
+                        logger.debug(f"📎 첨부파일 정보: {attachment}")
+                        
+                        file_path = attachment.get('file_path')
+                        filename = attachment.get('filename')
+                        
+                        if file_path and os.path.exists(file_path):
+                            logger.info(f"📎 파일 존재 확인: {file_path}")
+                            try:
+                                with open(file_path, 'rb') as f:
+                                    logger.info(f"📎 파일 읽기 시작: {filename}")
+                                    file_data = f.read()
+                                    logger.info(f"📎 파일 읽기 완료 - 크기: {len(file_data)} bytes")
+                                
                                 part = MIMEBase('application', 'octet-stream')
-                                part.set_payload(f.read())
+                                part.set_payload(file_data)
                                 encoders.encode_base64(part)
-                                part.add_header(
-                                    'Content-Disposition',
-                                    f'attachment; filename= {attachment.get("filename", "attachment")}'
-                                )
+                                
+                                # 파일명 인코딩 처리
+                                logger.info(f"📎 파일명 인코딩 시작: {filename}")
+                                try:
+                                    filename.encode('ascii')
+                                    part.add_header(
+                                        'Content-Disposition',
+                                        f'attachment; filename="{filename}"'
+                                    )
+                                    logger.info(f"📎 ASCII 헤더 추가 완료")
+                                except UnicodeEncodeError:
+                                    encoded_filename = urllib.parse.quote(filename)
+                                    part.add_header(
+                                        'Content-Disposition',
+                                        f"attachment; filename*=UTF-8''{encoded_filename}"
+                                    )
+                                    logger.info(f"📎 RFC 2231 헤더 추가 완료")
+                                
                                 msg.attach(part)
+                                logger.info(f"📎 첨부파일 추가됨: {filename}")
+                                
+                            except Exception as attach_error:
+                                logger.error(f"❌ 첨부파일 처리 중 오류: {str(attach_error)}")
+                                import traceback
+                                logger.error(f"❌ 상세 스택 트레이스: {traceback.format_exc()}")
+                                raise
+                        else:
+                            logger.warning(f"⚠️ 첨부파일을 찾을 수 없음: {file_path}")
+                else:
+                    logger.info("📎 첨부파일 없음")
                 
                 # SMTP 서버 연결 및 발송
                 logger.info(f"🔗 SMTP 서버 연결 시도 - 서버: {self.smtp_server}:{self.smtp_port}")
-                logger.info(f"📧 메일 정보 - 발송자: {sender_email}, 수신자: {recipient_emails}, 제목: {subject}")
                 
-                try:
-                    with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                        logger.info("✅ SMTP 서버 연결 성공")
-                        
-                        # TLS 사용 시 STARTTLS
-                        if self.use_tls:
-                            logger.info("🔒 TLS 연결 시작")
-                            server.starttls()
-                            logger.info("✅ TLS 연결 완료")
-                        
-                        # 인증 정보가 있으면 로그인
-                        if self.smtp_username and self.smtp_password:
-                            logger.info(f"🔐 SMTP 인증 시도 - 사용자: {self.smtp_username}")
-                            server.login(self.smtp_username, self.smtp_password)
-                            logger.info("✅ SMTP 인증 성공")
-                        else:
-                            logger.info("📧 SMTP 인증 없이 발송 시도 (로컬 서버)")
-                        
-                        # 메일 발송
-                        logger.info("📤 메일 발송 시작")
-                        server.send_message(msg)
-                        logger.info("✅ 메일 발송 완료")
-                        
-                except ConnectionRefusedError as e:
-                    logger.error(f"❌ SMTP 서버 연결 거부 - {self.smtp_server}:{self.smtp_port}")
-                    logger.error(f"상세 오류: {str(e)}")
-                    raise
-                except Exception as e:
-                    logger.error(f"❌ SMTP 연결 중 예상치 못한 오류: {str(e)}")
-                    logger.error(f"오류 타입: {type(e).__name__}")
-                    raise
+                with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                    logger.info("✅ SMTP 서버 연결 성공")
                     
-                logger.info(f"✅ SMTP 메일 발송 성공 - 수신자: {len(recipient_emails)}명")
+                    # TLS 사용 시 STARTTLS
+                    if self.use_tls:
+                        logger.info("🔒 TLS 연결 시작")
+                        server.starttls()
+                        logger.info("✅ TLS 연결 완료")
+                    
+                    # 인증 정보가 있으면 로그인
+                    if self.smtp_username and self.smtp_password:
+                        logger.info(f"🔐 SMTP 인증 시도 - 사용자: {self.smtp_username}")
+                        server.login(self.smtp_username, self.smtp_password)
+                        logger.info("✅ SMTP 인증 성공")
+                    else:
+                        logger.info("📧 SMTP 인증 없이 발송 시도 (로컬 서버)")
+                    
+                    # 메일 발송
+                    logger.info("📤 메일 발송 시작")
+                    logger.debug(f"📤 메시지 타입: {type(msg)}")
+                    
+                    server.send_message(msg)
+                    logger.info("✅ 메일 발송 완료")
                 
                 return {
                     "success": True,
@@ -433,6 +514,8 @@ class MailService:
             except Exception as e:
                 error_msg = f"메일 발송 중 예상치 못한 오류: {str(e)}"
                 logger.error(f"❌ {error_msg}")
+                import traceback
+                logger.error(f"❌ 상세 스택 트레이스: {traceback.format_exc()}")
                 return {
                     "success": False,
                     "error": error_msg,
@@ -442,6 +525,18 @@ class MailService:
         # 동기 SMTP 코드를 비동기로 실행
         try:
             result = await asyncio.to_thread(_send_smtp_sync)
+            
+            # 메일 발송이 성공한 경우 조직 사용량 업데이트
+            if result.get('success', False) and org_id and self.db:
+                logger.info(f"🔍 조직 사용량 업데이트 호출 (send_email_smtp) - 조직: {org_id}, 수신자 수: {len(recipient_emails)}")
+                try:
+                    await self._update_organization_usage(org_id, len(recipient_emails))
+                    logger.info(f"✅ 조직 사용량 업데이트 완료 (send_email_smtp) - 조직: {org_id}")
+                except Exception as usage_error:
+                    logger.error(f"❌ 조직 사용량 업데이트 실패 (send_email_smtp) - 조직: {org_id}, 오류: {str(usage_error)}")
+                    logger.error(f"❌ 상세 스택 트레이스: {traceback.format_exc()}")
+                    # 사용량 업데이트 실패는 메일 발송 성공에 영향을 주지 않음
+            
             return result
         except Exception as e:
             error_msg = f"비동기 실행 오류: {str(e)}"
@@ -684,6 +779,18 @@ class MailService:
                     recipient_record.read_at = datetime.now(timezone.utc)
                     self.db.commit()
             
+            # 메일 읽기 로그 기록
+            mail_log = MailLog(
+                action="read",
+                details=f"메일 읽기 - 제목: {mail.subject}, 읽기 유형: {'수신자' if is_recipient else '발송자'}",
+                mail_uuid=mail_uuid,
+                user_uuid=mail_user.user_uuid,
+                ip_address=None,  # TODO: 실제 요청에서 IP 주소 전달 필요
+                user_agent=None   # TODO: 실제 요청에서 User-Agent 전달 필요
+            )
+            self.db.add(mail_log)
+            self.db.commit()
+            
             return {
                 "mail_uuid": mail.mail_uuid,
                 "sender_email": mail.sender_email,
@@ -792,10 +899,11 @@ class MailService:
             # 메일 로그 기록
             mail_log = MailLog(
                 mail_uuid=mail_uuid,
+                user_uuid=mail_user.user_uuid,
                 action="delete" if not permanent else "permanent_delete",
-                user_email=mail_user.email,
-                details=f"메일 {'영구 ' if permanent else ''}삭제",
-                created_at=datetime.now(timezone.utc)
+                details=f"메일 {'영구 ' if permanent else ''}삭제 - 사용자: {mail_user.email}",
+                ip_address=None,  # TODO: 실제 요청에서 IP 주소 전달 필요
+                user_agent=None   # TODO: 실제 요청에서 User-Agent 전달 필요
             )
             self.db.add(mail_log)
             
@@ -935,3 +1043,223 @@ class MailService:
             self.db.flush()
         
         return folder
+    
+    async def _update_organization_usage(
+        self,
+        org_id: str,
+        email_count: int = 1,
+        max_retries: int = 3
+    ):
+        """
+        조직의 메일 사용량을 원자적으로 업데이트합니다. (동시성 안전)
+        
+        Args:
+            org_id: 조직 ID
+            email_count: 발송된 메일 수 (기본값: 1)
+            max_retries: 최대 재시도 횟수 (기본값: 3)
+        """
+        logger.info(f"🔍 _update_organization_usage 호출됨 - 조직: {org_id}, 메일 수: {email_count}")
+        
+        for attempt in range(max_retries + 1):
+            try:
+                # 오늘 날짜 (UTC 기준)
+                today = datetime.now(timezone.utc).date()
+                now = datetime.now(timezone.utc)
+                
+                # PostgreSQL UPSERT를 사용한 원자적 업데이트
+                # ON CONFLICT를 사용하여 동시성 문제 해결
+                upsert_sql = """
+                INSERT INTO organization_usage (
+                    org_id, usage_date, current_users, current_storage_gb,
+                    emails_sent_today, emails_received_today, 
+                    total_emails_sent, total_emails_received,
+                    created_at, updated_at
+                ) VALUES (
+                    :org_id, :usage_date, 0, 0,
+                    :email_count, 0,
+                    :email_count, 0,
+                    :now, :now
+                )
+                ON CONFLICT (org_id, usage_date) 
+                DO UPDATE SET
+                    emails_sent_today = organization_usage.emails_sent_today + :email_count,
+                    total_emails_sent = organization_usage.total_emails_sent + :email_count,
+                    updated_at = :now
+                RETURNING emails_sent_today, total_emails_sent;
+                """
+                
+                result = self.db.execute(upsert_sql, {
+                    'org_id': org_id,
+                    'usage_date': today,
+                    'email_count': email_count,
+                    'now': now
+                })
+                
+                # 결과 가져오기
+                row = result.fetchone()
+                if row:
+                    emails_sent_today, total_emails_sent = row
+                    logger.info(f"📊 조직 사용량 원자적 업데이트 완료 - 조직: {org_id}")
+                    logger.info(f"   오늘 발송: {emails_sent_today}, 총 발송: {total_emails_sent}")
+                else:
+                    logger.warning(f"⚠️ UPSERT 결과를 가져올 수 없음 - 조직: {org_id}")
+                
+                # 트랜잭션 커밋
+                self.db.commit()
+                logger.info(f"✅ _update_organization_usage 완료 - 조직: {org_id}, 시도: {attempt + 1}")
+                return
+                
+            except Exception as e:
+                # 트랜잭션 롤백
+                self.db.rollback()
+                
+                # 동시성 관련 오류인지 확인
+                error_str = str(e).lower()
+                is_concurrency_error = any(keyword in error_str for keyword in [
+                    'deadlock', 'lock', 'concurrent', 'serialization', 'conflict'
+                ])
+                
+                if is_concurrency_error and attempt < max_retries:
+                    # 지수 백오프로 재시도
+                    wait_time = (2 ** attempt) * 0.1  # 0.1초, 0.2초, 0.4초
+                    logger.warning(f"⚠️ 동시성 오류 발생, {wait_time}초 후 재시도 - 조직: {org_id}, 시도: {attempt + 1}, 오류: {str(e)}")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    logger.error(f"❌ 조직 사용량 업데이트 실패 - 조직: {org_id}, 시도: {attempt + 1}, 오류: {str(e)}")
+                    logger.error(f"Traceback: {traceback.format_exc()}")
+                    # 사용량 업데이트 실패는 메일 발송을 중단시키지 않음
+                    break
+    
+    async def _update_organization_usage_with_redis_lock(
+        self,
+        org_id: str,
+        email_count: int = 1
+    ):
+        """
+        Redis 분산 락을 사용한 조직 사용량 업데이트 (고도의 동시성 환경용)
+        
+        Args:
+            org_id: 조직 ID
+            email_count: 발송된 메일 수 (기본값: 1)
+        """
+        if not REDIS_AVAILABLE:
+            logger.warning(f"⚠️ Redis 사용 불가, 기본 UPSERT 방식으로 대체 - 조직: {org_id}")
+            return await self._update_organization_usage(org_id, email_count)
+        
+        logger.info(f"🔒 Redis 락을 사용한 조직 사용량 업데이트 시작 - 조직: {org_id}, 메일 수: {email_count}")
+        
+        try:
+            redis_client = get_redis_client()
+            if not redis_client:
+                logger.warning(f"⚠️ Redis 클라이언트 없음, 기본 UPSERT 방식으로 대체 - 조직: {org_id}")
+                return await self._update_organization_usage(org_id, email_count)
+            
+            usage_lock = OrganizationUsageLock(redis_client)
+            
+            async with usage_lock.lock_organization_usage(org_id, timeout=3) as acquired:
+                if not acquired:
+                    logger.warning(f"⚠️ Redis 락 획득 실패, 기본 UPSERT 방식으로 대체 - 조직: {org_id}")
+                    return await self._update_organization_usage(org_id, email_count)
+                
+                logger.info(f"🔒 Redis 락 획득 성공 - 조직: {org_id}")
+                
+                # 락을 획득한 상태에서 기존 방식으로 업데이트
+                # (Redis 락 + 기본 ORM 방식)
+                today = datetime.now(timezone.utc).date()
+                
+                # 기존 사용량 레코드 조회
+                usage = self.db.query(OrganizationUsage).filter(
+                    OrganizationUsage.org_id == org_id,
+                    func.date(OrganizationUsage.usage_date) == today
+                ).first()
+                
+                if usage:
+                    # 기존 레코드 업데이트
+                    old_sent_today = usage.emails_sent_today
+                    old_total_sent = usage.total_emails_sent
+                    
+                    usage.emails_sent_today += email_count
+                    usage.total_emails_sent += email_count
+                    usage.updated_at = datetime.now(timezone.utc)
+                    
+                    logger.info(f"📊 Redis 락 하에서 조직 사용량 업데이트 - 조직: {org_id}")
+                    logger.info(f"   이전 오늘 발송: {old_sent_today} -> 현재: {usage.emails_sent_today}")
+                    logger.info(f"   이전 총 발송: {old_total_sent} -> 현재: {usage.total_emails_sent}")
+                else:
+                    # 새 레코드 생성
+                    usage = OrganizationUsage(
+                        org_id=org_id,
+                        usage_date=datetime.now(timezone.utc),
+                        current_users=0,
+                        current_storage_gb=0,
+                        emails_sent_today=email_count,
+                        emails_received_today=0,
+                        total_emails_sent=email_count,
+                        total_emails_received=0,
+                        created_at=datetime.now(timezone.utc),
+                        updated_at=datetime.now(timezone.utc)
+                    )
+                    self.db.add(usage)
+                    logger.info(f"📊 Redis 락 하에서 조직 사용량 신규 생성 - 조직: {org_id}, 발송 수: {email_count}")
+                
+                # 트랜잭션 커밋
+                self.db.commit()
+                logger.info(f"✅ Redis 락을 사용한 조직 사용량 업데이트 완료 - 조직: {org_id}")
+                
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"❌ Redis 락을 사용한 조직 사용량 업데이트 실패 - 조직: {org_id}, 오류: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Redis 락 실패 시 기본 UPSERT 방식으로 대체
+            logger.info(f"🔄 기본 UPSERT 방식으로 재시도 - 조직: {org_id}")
+            return await self._update_organization_usage(org_id, email_count)
+            pass
+    
+    async def _check_daily_email_limit(
+        self,
+        org_id: str,
+        max_emails_per_day: int,
+        email_count: int
+    ):
+        """
+        일일 메일 발송 제한을 검증합니다.
+        
+        Args:
+            org_id: 조직 ID
+            max_emails_per_day: 일일 최대 발송 제한
+            email_count: 발송하려는 메일 수
+            
+        Raises:
+            HTTPException: 발송 제한 초과 시
+        """
+        try:
+            # 오늘 날짜 (UTC 기준)
+            today = datetime.now(timezone.utc).date()
+            
+            # 오늘 발송된 메일 수 조회
+            usage = self.db.query(OrganizationUsage).filter(
+                OrganizationUsage.org_id == org_id,
+                func.date(OrganizationUsage.usage_date) == today
+            ).first()
+            
+            current_sent = usage.emails_sent_today if usage else 0
+            
+            # 발송 제한 검증
+            if max_emails_per_day > 0:  # 0은 무제한
+                if current_sent + email_count > max_emails_per_day:
+                    logger.warning(f"⚠️ 일일 메일 발송 제한 초과 - 조직: {org_id}, 현재: {current_sent}, 요청: {email_count}, 제한: {max_emails_per_day}")
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"일일 메일 발송 제한을 초과했습니다. (현재: {current_sent}/{max_emails_per_day})"
+                    )
+            
+            logger.info(f"📊 메일 발송 제한 검증 통과 - 조직: {org_id}, 현재: {current_sent}, 요청: {email_count}, 제한: {max_emails_per_day}")
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"❌ 메일 발송 제한 검증 실패 - 조직: {org_id}, 오류: {str(e)}")
+            # 검증 실패 시 안전하게 발송 허용 (기본 동작 유지)
+            pass

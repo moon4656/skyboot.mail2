@@ -396,10 +396,12 @@ async def move_mail_to_folder(
         
         # 로그 기록
         log_entry = MailLog(
+            action=f"moved_to_folder",
+            details=f"메일을 '{folder.name}' 폴더로 이동",
             mail_uuid=mail.mail_uuid,
             user_uuid=current_user.user_uuid,
-            action=f"moved_to_folder_{folder.name}",
-            timestamp=datetime.utcnow()
+            ip_address=None,  # TODO: 실제 IP 주소 추가
+            user_agent=None   # TODO: 실제 User-Agent 추가
         )
         db.add(log_entry)
         db.commit()

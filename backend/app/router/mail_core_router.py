@@ -14,7 +14,7 @@ import json
 
 from ..database.user import get_db
 from ..model.user_model import User
-from ..model.mail_model import FolderType, Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog
+from ..model.mail_model import FolderType, Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog, generate_mail_uuid
 from ..schemas.mail_schema import (
     MailSendRequest,
     MailResponse,
@@ -55,12 +55,29 @@ async def safe_attachments_handler(
     클라이언트가 잘못된 형태의 데이터를 보내더라도 안전하게 처리합니다.
     """
     try:
-        # multipart/form-data에서 attachments 필드 추출
+        # multipart/form-data에서 첨부파일 필드 추출
         form = await request.form()
+        logger.info(f"📎 Form 필드들: {list(form.keys())}")
+        
+        # 모든 필드 내용 확인
+        for key, value in form.items():
+            if isinstance(value, str):
+                logger.info(f"📎 필드 '{key}': 타입={type(value)}, 값={value}")
+            else:
+                filename = getattr(value, "filename", "unknown")
+                logger.info(f"📎 필드 '{key}': 타입={type(value)}, 값=파일객체({filename})")
+        
+        # 다양한 필드명으로 첨부파일 찾기
         attachments = form.getlist("attachments")
+        if not attachments:
+            attachments = form.getlist("files")  # 'files' 필드도 확인
+        if not attachments:
+            attachments = form.getlist("attachment")  # 단수형도 확인
+        
+        logger.info(f"📎 찾은 첨부파일: {len(attachments) if attachments else 0}개")
         
         if not attachments:
-            logger.debug("📎 첨부파일 없음")
+            logger.info("📎 첨부파일 없음")
             return None
             
         valid_files = []
@@ -93,7 +110,7 @@ async def send_mail(
     current_user: User = Depends(get_current_user),
     current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db),
-    attachments: Optional[List[UploadFile]] = Depends(safe_attachments_handler)
+    attachments: Optional[List[UploadFile]] = File(None, description="첨부파일 목록")
 ) -> MailSendResponse:
     """
     메일 발송 API
@@ -111,8 +128,9 @@ async def send_mail(
         if not mail_user:
             raise HTTPException(status_code=404, detail="Mail user not found in this organization")
         
-        # 메일 생성 (조직 ID 포함)
-        mail_uuid = str(uuid.uuid4())
+        # 메일 생성 (조직 ID 포함) - 년월일_시분초_uuid[12] 형식
+        from ..model.mail_model import generate_mail_uuid
+        mail_uuid = generate_mail_uuid()
         mail = Mail(
             mail_uuid=mail_uuid,
             sender_uuid=mail_user.user_uuid,
@@ -148,6 +166,7 @@ async def send_mail(
                         # 조직 내에 없는 경우 외부 사용자로 임시 생성
                         external_user_uuid = str(uuid.uuid4())
                         recipient_user = MailUser(
+                            user_id=f"external_{external_user_uuid[:8]}",  # user_id 필드 추가
                             user_uuid=external_user_uuid,
                             email=email,
                             password_hash="external_user",  # 외부 사용자 표시
@@ -187,6 +206,7 @@ async def send_mail(
                         # 조직 내에 없는 경우 외부 사용자로 임시 생성
                         external_user_uuid = str(uuid.uuid4())
                         recipient_user = MailUser(
+                            user_id=f"external_{external_user_uuid[:8]}",  # user_id 필드 추가
                             user_uuid=external_user_uuid,
                             email=email,
                             password_hash="external_user",  # 외부 사용자 표시
@@ -220,6 +240,7 @@ async def send_mail(
                         # 조직 내에 없는 경우 외부 사용자로 임시 생성
                         external_user_uuid = str(uuid.uuid4())
                         recipient_user = MailUser(
+                            user_id=f"external_{external_user_uuid[:8]}",  # user_id 필드 추가
                             user_uuid=external_user_uuid,
                             email=email,
                             password_hash="external_user",  # 외부 사용자 표시
@@ -238,21 +259,25 @@ async def send_mail(
                     recipients.append(recipient)
                     db.add(recipient)
         
-        # 첨부파일 처리 (안전한 처리)
+        # 첨부파일 처리
         attachment_list = []
         try:
             if attachments is not None and len(attachments) > 0:
                 logger.info(f"📎 첨부파일 처리 시작 - 개수: {len(attachments)}")
                 for i, attachment in enumerate(attachments):
-                    if attachment and hasattr(attachment, 'filename') and hasattr(attachment, 'file') and attachment.filename:
+                    if attachment and attachment.filename:
+                        logger.info(f"📎 첨부파일 처리 중 - 파일명: {attachment.filename}, 타입: {attachment.content_type}")
+                        
                         # 파일 저장
                         file_id = str(uuid.uuid4())
                         file_extension = os.path.splitext(attachment.filename)[1]
                         saved_filename = f"{file_id}{file_extension}"
                         file_path = os.path.join(ATTACHMENT_DIR, saved_filename)
                         
+                        # 파일 내용 저장
                         with open(file_path, "wb") as buffer:
-                            shutil.copyfileobj(attachment.file, buffer)
+                            content = await attachment.read()
+                            buffer.write(content)
                         
                         # 첨부파일 정보 저장
                         mail_attachment = MailAttachment(
@@ -265,12 +290,15 @@ async def send_mail(
                         )
                         attachment_list.append(mail_attachment)
                         db.add(mail_attachment)
+                        logger.info(f"✅ 첨부파일 저장 완료 - 파일명: {attachment.filename}, 크기: {mail_attachment.file_size}바이트")
                     else:
-                        logger.warning(f"⚠️ 유효하지 않은 첨부파일 건너뜀 - 인덱스: {i}, 타입: {type(attachment)}")
+                        logger.warning(f"⚠️ 유효하지 않은 첨부파일 건너뜀 - 인덱스: {i}, 파일명: {getattr(attachment, 'filename', 'None')}")
             else:
-                logger.debug(f"📎 첨부파일 없음 - attachments: {attachments}")
+                logger.info(f"📎 첨부파일 없음 - attachments: {attachments}")
         except Exception as attachment_error:
             logger.error(f"❌ 첨부파일 처리 중 오류 발생: {str(attachment_error)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             # 첨부파일 오류가 있어도 메일 발송은 계속 진행
             attachment_list = []
         
@@ -287,13 +315,26 @@ async def send_mail(
         smtp_result = {'success': False, 'error': '알 수 없는 오류'}
         try:
             mail_service = MailService(db)
+            
+            # 첨부파일 정보를 메일 서비스 형식으로 변환
+            attachment_data = []
+            if attachment_list:
+                for attachment in attachment_list:
+                    attachment_data.append({
+                        "filename": attachment.filename,
+                        "file_path": attachment.file_path,
+                        "file_size": attachment.file_size,
+                        "content_type": attachment.content_type
+                    })
+            
             smtp_result = await mail_service.send_email_smtp(
                 sender_email=mail_user.email,
                 recipient_emails=[r.recipient_email for r in recipients],
                 subject=subject,
                 body_text=content,
                 body_html=None,  # Form 데이터에서는 HTML 본문이 없음
-                org_id=current_org_id
+                org_id=current_org_id,
+                attachments=attachment_data if attachment_data else None
             )
             
             if not smtp_result.get('success', False):
@@ -374,8 +415,8 @@ async def send_mail_json(
         if not mail_user:
             raise HTTPException(status_code=404, detail="Mail user not found in this organization")
         
-        # 메일 생성 (조직 ID 포함)
-        mail_uuid = str(uuid.uuid4())
+        # 메일 생성 (조직 ID 포함) - 년월일_시분초_uuid[12] 형식
+        mail_uuid = generate_mail_uuid()
         mail = Mail(
             mail_uuid=mail_uuid,
             sender_uuid=mail_user.user_uuid,
@@ -1398,6 +1439,18 @@ async def download_attachment(
         if not os.path.exists(attachment.file_path):
             logger.warning(f"⚠️ 첨부파일이 존재하지 않음 - 경로: {attachment.file_path}")
             raise HTTPException(status_code=404, detail="첨부파일이 존재하지 않습니다")
+        
+        # 첨부파일 다운로드 로그 생성
+        mail_log = MailLog(
+            action="download_attachment",
+            details=f"첨부파일 다운로드 - 파일명: {attachment.filename}, 크기: {attachment.file_size}바이트",
+            mail_uuid=attachment.mail_uuid,
+            user_uuid=current_user.user_uuid,
+            ip_address=None,  # TODO: 실제 IP 주소 추가
+            user_agent=None   # TODO: 실제 User-Agent 추가
+        )
+        db.add(mail_log)
+        db.commit()
         
         logger.info(f"✅ download_attachment 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 첨부파일: {attachment.filename}")
         

@@ -17,7 +17,7 @@ def setup_logging():
     
     # 로거 설정
     logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     
     # 기존 핸들러 제거 (중복 방지)
     for handler in logger.handlers[:]:

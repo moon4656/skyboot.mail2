@@ -73,20 +73,20 @@ class MailUser(Base):
     )
 
 def generate_mail_uuid() -> str:
-    """메일 ID 생성 (년월일_시분초_uuid 형태)"""
+    """메일 ID 생성 (년월일_시분초_uuid[12] 형태)"""
     from datetime import datetime
     import uuid
     
     now = datetime.now()
     timestamp = now.strftime("%Y%m%d_%H%M%S")
-    mail_uuid = str(uuid.uuid4())[:8]  # UUID 앞 8자리만 사용
+    mail_uuid = str(uuid.uuid4()).replace('-', '')[:12]  # UUID 앞 12자리만 사용 (하이픈 제거)
     return f"{timestamp}_{mail_uuid}"
 
 class Mail(Base):
     """메일 모델 - 조직 연결"""
     __tablename__ = "mails"
     
-    mail_uuid = Column(String(50), primary_key=True, index=True, comment="메일 고유 UUID")
+    mail_uuid = Column(String(50), primary_key=True, index=True, default=generate_mail_uuid, comment="메일 고유 UUID")
     org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="조직 ID")
     sender_uuid = Column(String(36), ForeignKey("mail_users.user_uuid"), nullable=False, comment="발송자 UUID")
     subject = Column(String(255), nullable=False, comment="메일 제목")

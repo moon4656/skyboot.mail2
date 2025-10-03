@@ -221,6 +221,9 @@ sudo systemctl restart postfix
 # postfix status
 sudo systemctl status postfix
 
+# wsl 에서 postfix 테스트
+echo "Test mail from Postfix on WSL" | mail -s "Test" moon4656@hibiznet.com
+
 ## 🔧 포트 설정
 ### 기본 포트
 
@@ -330,5 +333,44 @@ sudo tail -f /var/log/mail.log
     -Method POST `
     -Headers @{"Authorization"="Bearer $token"; "Content-Type"="application/json"} `
     -Body '{"to_email":"moon4656@gmail.com","subject":"테스트 메일","body":"안녕하세요, 테스트 메일입니다."}'
+
+### 차후 걔발 계획
+
+# 개선이 필요한 영역
+- 필요한 기능
+- 메일 발송 시 daily_email_count 증가
+- 첨부파일 업로드 시 storage_used_mb 업데이트
+- 메일 삭제 시 저장 용량 감소
+- 조직별 실시간 통계 업데이트
+
+# 제한 강제 로직
+- 구현 필요
+- 일일 메일 발송 한도 검증
+- 저장 용량 초과 시 업로드 차단
+- 사용자 수 제한 검증
+- 첨부파일 크기 제한 강제
+
+# 모니터링 및 알림
+- 추가 필요 기능
+- 사용량 80%, 90%, 100% 임계값 알림
+- 관리자 대시보드
+- 사용량 트렌드 분석
+- 자동 스케일링 제안
+
+## 📋 권장 구현 우선순위 
+# Phase 1: 기본 제한 강제
+1. 일일 메일 발송 제한 검증
+2. 저장 용량 제한 강제
+3. 첨부파일 크기 제한 강제 
+
+# Phase 2: 실시간 모니터링
+1. 사용량 자동 업데이트 로직
+2. 실시간 통계 계산
+3. 사용량 추적 개선 
+
+# Phase 3: 고급 모니터링
+1. 알림 시스템 구축
+2. 관리자 대시보드
+3. 사용량 분석 및 리포팅
 
 **SkyBoot Mail** - 현대적이고 안정적인 메일 발송 솔루션 🚀
