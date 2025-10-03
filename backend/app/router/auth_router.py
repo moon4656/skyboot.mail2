@@ -42,7 +42,7 @@ async def login(
             with get_db_session() as log_db:
                 login_log = LoginLog(
                     user_uuid=user_uuid,
-                    email=user_credentials.email,
+                    user_id=user_credentials.user_id,
                     ip_address=client_ip,
                     user_agent=user_agent,
                     login_status=status,
@@ -63,11 +63,11 @@ async def login(
         )
         if not user:
             # 로그인 실패 로그 기록 (안전한 방식)
-            safe_log_login_attempt("failed", "Incorrect email or password")
+            safe_log_login_attempt("failed", "Incorrect user id or password")
             
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password",
+                detail="Incorrect user id or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         
@@ -95,9 +95,9 @@ async def login(
         raise
     except Exception as e:
         # 기타 예외 발생 시 로그 기록 (안전한 방식)
-        logger.error(f"❌ 로그인 시스템 오류 - 이메일: {user_credentials.email}, 오류: {str(e)}")
+        logger.error(f"❌ 로그인 시스템 오류 - 사용자 ID: {user_credentials.user_id}, 오류: {str(e)}")
         safe_log_login_attempt("failed", f"System error: {str(e)}")
-        
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"

@@ -31,13 +31,20 @@ class MailService:
     SaaS 다중 조직 지원을 위한 메일 발송, 조회, 관리 기능을 제공합니다.
     """
     
-    def __init__(self, db: Session):
+    def __init__(self, db: Optional[Session] = None):
         self.db = db
         self.smtp_server = os.getenv("SMTP_HOST", "localhost")
         self.smtp_port = int(os.getenv("SMTP_PORT", "25"))
         self.smtp_username = os.getenv("SMTP_USERNAME", "")
         self.smtp_password = os.getenv("SMTP_PASSWORD", "")
         self.use_tls = os.getenv("SMTP_USE_TLS", "false").lower() == "true"
+        
+        # SMTP 설정 로깅
+        logger.info(f"🔧 SMTP 설정 로드 - 서버: {self.smtp_server}:{self.smtp_port}, TLS: {self.use_tls}")
+        if self.smtp_username:
+            logger.info(f"🔐 SMTP 인증 설정됨 - 사용자: {self.smtp_username}")
+        else:
+            logger.info("📧 SMTP 인증 없음 (로컬 서버 모드)")
     
     async def send_mail(
         self,
@@ -284,6 +291,167 @@ class MailService:
             logger.error(f"❌ SMTP 메일 발송 실패: {str(e)}")
             raise
     
+    async def send_email_smtp(
+        self,
+        sender_email: str,
+        recipient_emails: List[str],
+        subject: str,
+        body_text: str,
+        body_html: Optional[str] = None,
+        org_id: Optional[str] = None,
+        attachments: Optional[List[Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """
+        SMTP를 통해 이메일을 발송합니다. (비동기)
+        
+        Args:
+            sender_email: 발송자 이메일
+            recipient_emails: 수신자 이메일 목록
+            subject: 메일 제목
+            body_text: 텍스트 본문
+            body_html: HTML 본문 (선택사항)
+            org_id: 조직 ID (선택사항)
+            attachments: 첨부파일 목록 (선택사항)
+            
+        Returns:
+            발송 결과 딕셔너리
+        """
+        import asyncio
+        
+        logger.info(f"🚀 send_email_smtp 메서드 호출됨 - 조직: {org_id}, 발송자: {sender_email}, 수신자: {len(recipient_emails)}명, 제목: {subject}")
+        logger.info(f"📧 SMTP 설정 - 서버: {self.smtp_server}:{self.smtp_port}, TLS: {self.use_tls}, 인증: {'있음' if self.smtp_username else '없음'}")
+        
+        def _send_smtp_sync():
+            """동기 SMTP 발송 함수"""
+            try:
+                logger.info(f"📤 SMTP 메일 발송 시작 - 발송자: {sender_email}, 수신자: {len(recipient_emails)}명")
+                
+                # MIME 메시지 생성
+                msg = MIMEMultipart('alternative')
+                msg['From'] = sender_email
+                msg['To'] = ', '.join(recipient_emails)
+                msg['Subject'] = subject
+                
+                # 텍스트 본문 추가
+                if body_text:
+                    text_part = MIMEText(body_text, 'plain', 'utf-8')
+                    msg.attach(text_part)
+                
+                # HTML 본문 추가
+                if body_html:
+                    html_part = MIMEText(body_html, 'html', 'utf-8')
+                    msg.attach(html_part)
+                elif body_text:
+                    # HTML이 없으면 텍스트를 HTML로 변환
+                    html_content = body_text.replace('\n', '<br>')
+                    html_part = MIMEText(html_content, 'html', 'utf-8')
+                    msg.attach(html_part)
+                
+                # 첨부파일 추가
+                if attachments:
+                    for attachment in attachments:
+                        if os.path.exists(attachment.get("file_path", "")):
+                            with open(attachment["file_path"], "rb") as f:
+                                part = MIMEBase('application', 'octet-stream')
+                                part.set_payload(f.read())
+                                encoders.encode_base64(part)
+                                part.add_header(
+                                    'Content-Disposition',
+                                    f'attachment; filename= {attachment.get("filename", "attachment")}'
+                                )
+                                msg.attach(part)
+                
+                # SMTP 서버 연결 및 발송
+                logger.info(f"🔗 SMTP 서버 연결 시도 - 서버: {self.smtp_server}:{self.smtp_port}")
+                logger.info(f"📧 메일 정보 - 발송자: {sender_email}, 수신자: {recipient_emails}, 제목: {subject}")
+                
+                try:
+                    with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                        logger.info("✅ SMTP 서버 연결 성공")
+                        
+                        # TLS 사용 시 STARTTLS
+                        if self.use_tls:
+                            logger.info("🔒 TLS 연결 시작")
+                            server.starttls()
+                            logger.info("✅ TLS 연결 완료")
+                        
+                        # 인증 정보가 있으면 로그인
+                        if self.smtp_username and self.smtp_password:
+                            logger.info(f"🔐 SMTP 인증 시도 - 사용자: {self.smtp_username}")
+                            server.login(self.smtp_username, self.smtp_password)
+                            logger.info("✅ SMTP 인증 성공")
+                        else:
+                            logger.info("📧 SMTP 인증 없이 발송 시도 (로컬 서버)")
+                        
+                        # 메일 발송
+                        logger.info("📤 메일 발송 시작")
+                        server.send_message(msg)
+                        logger.info("✅ 메일 발송 완료")
+                        
+                except ConnectionRefusedError as e:
+                    logger.error(f"❌ SMTP 서버 연결 거부 - {self.smtp_server}:{self.smtp_port}")
+                    logger.error(f"상세 오류: {str(e)}")
+                    raise
+                except Exception as e:
+                    logger.error(f"❌ SMTP 연결 중 예상치 못한 오류: {str(e)}")
+                    logger.error(f"오류 타입: {type(e).__name__}")
+                    raise
+                    
+                logger.info(f"✅ SMTP 메일 발송 성공 - 수신자: {len(recipient_emails)}명")
+                
+                return {
+                    "success": True,
+                    "message": f"메일이 성공적으로 발송되었습니다. (수신자: {len(recipient_emails)}명)",
+                    "recipients_count": len(recipient_emails),
+                    "smtp_server": f"{self.smtp_server}:{self.smtp_port}"
+                }
+                
+            except smtplib.SMTPAuthenticationError as e:
+                error_msg = f"SMTP 인증 실패: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "error_type": "authentication"
+                }
+            except smtplib.SMTPConnectError as e:
+                error_msg = f"SMTP 서버 연결 실패: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "error_type": "connection"
+                }
+            except smtplib.SMTPException as e:
+                error_msg = f"SMTP 오류: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "error_type": "smtp"
+                }
+            except Exception as e:
+                error_msg = f"메일 발송 중 예상치 못한 오류: {str(e)}"
+                logger.error(f"❌ {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "error_type": "unknown"
+                }
+        
+        # 동기 SMTP 코드를 비동기로 실행
+        try:
+            result = await asyncio.to_thread(_send_smtp_sync)
+            return result
+        except Exception as e:
+            error_msg = f"비동기 실행 오류: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "error_type": "async"
+            }
+    
     async def get_mails_by_folder(
         self,
         org_id: str,
@@ -310,7 +478,7 @@ class MailService:
             메일 목록 및 페이지네이션 정보
         """
         try:
-            logger.info(f"📬 메일 조회 - 조직 ID: {org_id}, 사용자 ID: {user_id}, 폴더: {folder_type}")
+            logger.info(f"📬 메일 조회 - 조직 ID: {org_id}, 사용자 ID: {user_uuid}, 폴더: {folder_type}")
             
             # 사용자 검증
             user = self.db.query(User).filter(
@@ -657,7 +825,7 @@ class MailService:
             메일 통계 정보
         """
         try:
-            logger.info(f"📊 메일 통계 조회 - 조직 ID: {org_id}, 사용자 ID: {user_id}")
+            logger.info(f"📊 메일 통계 조회 - 조직 ID: {org_id}, 사용자 ID: {user_uuid}")
             
             # 사용자 검증
             user = self.db.query(User).filter(

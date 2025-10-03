@@ -1,6 +1,8 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
+
+from sqlalchemy.sql import roles
 
 class UserBase(BaseModel):
     """사용자 기본 스키마"""
@@ -28,13 +30,73 @@ class UserResponse(BaseModel):
     created_at: datetime = Field(..., description="생성 시간")
     updated_at: Optional[datetime] = Field(None, description="수정 시간")
     
-    class Config:                                                                                                
-        populate_by_name = True
+    # Pydantic v2 구성 및 Swagger 예시
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "user_id": "user01",
+                "username": "이성용",
+                "email": "user01@example.com",
+                "org_id": "3856a8c1-84a4-4019-9133-655cacab4bc9",
+                "user_uuid": "3b959219-da10-42bb-9693-0aa3ed502cd3",
+                "role": "user",
+                "is_active": True
+            }
+        }
+    )
+
+class UserUpdate(BaseModel):
+    """사용자 수정 요청 스키마 (Edit Value Schema)"""
+    username: Optional[str] = Field(None, min_length=3, max_length=100, description="사용자명")
+    full_name: Optional[str] = Field(None, max_length=100, description="전체 이름")
+    is_active: Optional[bool] = Field(None, description="활성 상태")
+    roles: Optional[list[str]] = Field(None, description="사용자 역할")
+    
+    # Pydantic v2 구성 및 Swagger 예시
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "username": "이성용",
+                "full_name": "이성용 과장",
+                "is_active": True,
+                "roles": ["user", "admin"]
+            }
+        }
+    )
 
 class UserLogin(BaseModel):
     """사용자 로그인 스키마"""
     user_id: str = Field(..., description="사용자 ID")
     password: str = Field(..., description="비밀번호")
+    
+    # Pydantic v2 구성 및 Swagger 예시
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "user_id": "user01",
+                "password": "test",
+            }
+        }
+    )    
+
+class UserChangePassword(BaseModel):
+    """비밀번호 변경 요청 스키마"""
+    current_password: str = Field(..., min_length=4, description="현재 비밀번호")
+    new_password: str = Field(..., min_length=4, description="새 비밀번호")
+
+    # Pydantic v2 구성 및 Swagger 예시
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "current_password": "old-pass-1234",
+                "new_password": "new-pass-5678"
+            }
+        }
+    )
 
 class Token(BaseModel):
     """토큰 응답 스키마"""

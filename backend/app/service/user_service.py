@@ -590,12 +590,12 @@ class UserService:
         """
         try:
             # 전체 사용자 수
-            total_users = self.db.query(func.count(User.id)).filter(
+            total_users = self.db.query(func.count(User.user_id)).filter(
                 User.org_id == org_id
             ).scalar()
             
             # 활성 사용자 수
-            active_users = self.db.query(func.count(User.id)).filter(
+            active_users = self.db.query(func.count(User.user_id)).filter(
                 and_(
                     User.org_id == org_id,
                     User.is_active == True
@@ -613,7 +613,7 @@ class UserService:
             
             # 최근 30일 내 생성된 사용자 수
             thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-            recent_users = self.db.query(func.count(User.id)).filter(
+            recent_users = self.db.query(func.count(User.user_id)).filter(
                 and_(
                     User.org_id == org_id,
                     User.created_at >= thirty_days_ago

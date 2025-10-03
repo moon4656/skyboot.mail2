@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from ..database.user import get_db
 from ..model.user_model import User
-from ..schemas.user_schema import UserCreate, UserResponse
+from ..schemas.user_schema import UserCreate, UserResponse, UserUpdate, UserChangePassword
 from ..service.user_service import UserService
 from ..middleware.tenant_middleware import get_current_org, get_current_user, require_org
 from ..service.auth_service import get_current_user as auth_get_current_user, get_current_admin_user
@@ -121,7 +121,7 @@ async def get_user(
         )
     
     user_service = UserService(db)
-    user = await user_service.get_user_by_id(current_org['org_id'], user_id)
+    user = await user_service.get_user_by_id(current_org['id'], user_id)
     
     if not user:
         raise HTTPException(
@@ -135,7 +135,7 @@ async def get_user(
 @router.put("/{user_id}", response_model=UserResponse, summary="사용자 정보 수정")
 async def update_user(
     user_id: str,
-    update_data: Dict[str, Any],
+    update_data: UserUpdate,
     current_user: User = Depends(auth_get_current_user),
     current_org = Depends(get_current_org),
     db: Session = Depends(get_db)
@@ -156,14 +156,18 @@ async def update_user(
         )
     
     # 일반 사용자는 is_active 필드 수정 불가
-    if current_user.role not in ["admin", "system_admin"] and 'is_active' in update_data:
-        del update_data['is_active']
+    if current_user.role not in ["admin", "system_admin"] and getattr(update_data, 'is_active', None) is not None:
+        # pydantic 모델이므로 dict로 변환 후 필드를 제거
+        data = update_data.dict(exclude_unset=True)
+        data.pop('is_active', None)
+    else:
+        data = update_data.dict(exclude_unset=True)
     
     user_service = UserService(db)
     return await user_service.update_user(
         org_id=current_org['id'],
         user_id=user_id,
-        update_data=update_data
+        update_data=data
     )
 
 
@@ -211,7 +215,7 @@ async def delete_user(
 @router.post("/{user_id}/change-password", summary="비밀번호 변경")
 async def change_password(
     user_id: str,
-    password_data: Dict[str, str],
+    password_data: UserChangePassword,
     current_user: User = Depends(auth_get_current_user),
     current_org = Depends(get_current_org),
     db: Session = Depends(get_db)
@@ -231,19 +235,14 @@ async def change_password(
             detail="본인 또는 관리자 권한이 필요합니다."
         )
     
-    # 필수 필드 확인
-    if 'current_password' not in password_data or 'new_password' not in password_data:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="current_password와 new_password가 필요합니다."
-        )
+    # 스키마로 검증되어 별도 필수 필드 확인 불필요
     
     user_service = UserService(db)
     success = await user_service.change_password(
         org_id=current_org['id'],
         user_id=user_id,
-        current_password=password_data['current_password'],
-        new_password=password_data['new_password']
+        current_password=password_data.current_password,
+        new_password=password_data.new_password
     )
     
     if success:

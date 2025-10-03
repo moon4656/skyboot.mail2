@@ -680,9 +680,10 @@ async def restore_mails(
                             for recipient_info in mail_info['recipients']:
                                 recipient = MailRecipient(
                                     mail_uuid=mail_info['mail_uuid'],
-                                    email=recipient_info['email'],
-                                    recipient_type=recipient_info['type'],
-                                    name=recipient_info.get('name')
+                                    recipient_email=recipient_info['email'],  # 올바른 필드명으로 수정
+                                    recipient_type=recipient_info['type']
+                                    # recipient_uuid는 복원 시 별도 처리 필요
+                                    # name 필드는 MailRecipient 모델에 없음
                                 )
                                 db.add(recipient)
                         

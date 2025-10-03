@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query, Form, status
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query, Form, status, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, asc
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 import os
 import uuid
 import shutil
@@ -46,6 +46,41 @@ security = HTTPBearer()
 ATTACHMENT_DIR = "attachments"
 os.makedirs(ATTACHMENT_DIR, exist_ok=True)
 
+# 안전한 첨부파일 처리를 위한 커스텀 dependency
+async def safe_attachments_handler(
+    request: Request
+) -> Optional[List[UploadFile]]:
+    """
+    첨부파일을 안전하게 처리하는 dependency 함수
+    클라이언트가 잘못된 형태의 데이터를 보내더라도 안전하게 처리합니다.
+    """
+    try:
+        # multipart/form-data에서 attachments 필드 추출
+        form = await request.form()
+        attachments = form.getlist("attachments")
+        
+        if not attachments:
+            logger.debug("📎 첨부파일 없음")
+            return None
+            
+        valid_files = []
+        for i, attachment in enumerate(attachments):
+            # UploadFile인지 확인
+            if isinstance(attachment, UploadFile) and attachment.filename:
+                valid_files.append(attachment)
+                logger.debug(f"📎 유효한 첨부파일: {attachment.filename}")
+            elif isinstance(attachment, str):
+                logger.warning(f"⚠️ 문자열 형태의 첨부파일 무시: {attachment}")
+            else:
+                logger.warning(f"⚠️ 유효하지 않은 첨부파일 건너뜀 - 인덱스: {i}, 타입: {type(attachment)}")
+        
+        logger.debug(f"📎 처리된 첨부파일 개수: {len(valid_files)}")
+        return valid_files if valid_files else None
+        
+    except Exception as e:
+        logger.error(f"❌ 첨부파일 처리 중 오류: {str(e)}")
+        return None
+
 
 @router.post("/send", response_model=MailSendResponse, summary="메일 발송")
 async def send_mail(
@@ -55,10 +90,10 @@ async def send_mail(
     subject: str = Form(..., description="메일 제목"),
     content: str = Form(..., description="메일 내용"),
     priority: MailPriority = Form(MailPriority.NORMAL, description="메일 우선순위"),
-    attachments: List[UploadFile] = File(None, description="첨부파일"),
     current_user: User = Depends(get_current_user),
     current_org_id: str = Depends(get_current_org_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    attachments: Optional[List[UploadFile]] = Depends(safe_attachments_handler)
 ) -> MailSendResponse:
     """
     메일 발송 API
@@ -66,6 +101,7 @@ async def send_mail(
     """
     try:
         logger.info(f"📤 메일 발송 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 수신자: {to_emails}")
+        logger.debug(f"🔍 첨부파일 정보 - 타입: {type(attachments)}, 값: {attachments}")
         
         # 조직 내에서 메일 사용자 조회
         mail_user = db.query(MailUser).filter(
@@ -128,6 +164,7 @@ async def send_mail(
                     recipient = MailRecipient(
                         mail_uuid=mail.mail_uuid,
                         recipient_uuid=recipient_user.user_uuid,
+                        recipient_email=email,  # 누락된 recipient_email 필드 추가
                         recipient_type=recipient_type_value
                     )
                     logger.info(f"🔍 DEBUG: recipient.recipient_type = {recipient.recipient_type}")
@@ -162,6 +199,7 @@ async def send_mail(
                     recipient = MailRecipient(
                         mail_uuid=mail.mail_uuid,
                         recipient_uuid=recipient_user.user_uuid,
+                        recipient_email=email,  # 누락된 recipient_email 필드 추가
                         recipient_type=RecipientType.CC.value
                     )
                     recipients.append(recipient)
@@ -194,47 +232,116 @@ async def send_mail(
                     recipient = MailRecipient(
                         mail_uuid=mail.mail_uuid,
                         recipient_uuid=recipient_user.user_uuid,
+                        recipient_email=email,  # 누락된 recipient_email 필드 추가
                         recipient_type=RecipientType.BCC.value
                     )
                     recipients.append(recipient)
                     db.add(recipient)
         
-        # 첨부파일 처리
+        # 첨부파일 처리 (안전한 처리)
         attachment_list = []
-        if attachments:
-            for attachment in attachments:
-                if attachment.filename:
-                    # 파일 저장
-                    file_id = str(uuid.uuid4())
-                    file_extension = os.path.splitext(attachment.filename)[1]
-                    saved_filename = f"{file_id}{file_extension}"
-                    file_path = os.path.join(ATTACHMENT_DIR, saved_filename)
-                    
-                    with open(file_path, "wb") as buffer:
-                        shutil.copyfileobj(attachment.file, buffer)
-                    
-                    # 첨부파일 정보 저장
-                    mail_attachment = MailAttachment(
-                        attachment_uuid=file_id,
-                        mail_uuid=mail.mail_uuid,
-                        filename=attachment.filename,
-                        file_path=file_path,
-                        file_size=os.path.getsize(file_path),
-                        content_type=attachment.content_type or mimetypes.guess_type(attachment.filename)[0]
-                    )
-                    attachment_list.append(mail_attachment)
-                    db.add(mail_attachment)
+        try:
+            if attachments is not None and len(attachments) > 0:
+                logger.info(f"📎 첨부파일 처리 시작 - 개수: {len(attachments)}")
+                for i, attachment in enumerate(attachments):
+                    if attachment and hasattr(attachment, 'filename') and hasattr(attachment, 'file') and attachment.filename:
+                        # 파일 저장
+                        file_id = str(uuid.uuid4())
+                        file_extension = os.path.splitext(attachment.filename)[1]
+                        saved_filename = f"{file_id}{file_extension}"
+                        file_path = os.path.join(ATTACHMENT_DIR, saved_filename)
+                        
+                        with open(file_path, "wb") as buffer:
+                            shutil.copyfileobj(attachment.file, buffer)
+                        
+                        # 첨부파일 정보 저장
+                        mail_attachment = MailAttachment(
+                            attachment_uuid=file_id,
+                            mail_uuid=mail.mail_uuid,
+                            filename=attachment.filename,
+                            file_path=file_path,
+                            file_size=os.path.getsize(file_path),
+                            content_type=attachment.content_type or mimetypes.guess_type(attachment.filename)[0]
+                        )
+                        attachment_list.append(mail_attachment)
+                        db.add(mail_attachment)
+                    else:
+                        logger.warning(f"⚠️ 유효하지 않은 첨부파일 건너뜀 - 인덱스: {i}, 타입: {type(attachment)}")
+            else:
+                logger.debug(f"📎 첨부파일 없음 - attachments: {attachments}")
+        except Exception as attachment_error:
+            logger.error(f"❌ 첨부파일 처리 중 오류 발생: {str(attachment_error)}")
+            # 첨부파일 오류가 있어도 메일 발송은 계속 진행
+            attachment_list = []
+        
+        # 메일 로그 생성
+        mail_log = MailLog(
+            mail_uuid=mail.mail_uuid,
+            user_uuid=mail_user.user_uuid,
+            action="SEND",
+            details=f"메일 발송 - 수신자: {len(recipients)}명"
+        )
+        db.add(mail_log)
+        
+        # 실제 메일 발송 (SMTP)
+        smtp_result = {'success': False, 'error': '알 수 없는 오류'}
+        try:
+            mail_service = MailService(db)
+            smtp_result = await mail_service.send_email_smtp(
+                sender_email=mail_user.email,
+                recipient_emails=[r.recipient_email for r in recipients],
+                subject=subject,
+                body_text=content,
+                body_html=None,  # Form 데이터에서는 HTML 본문이 없음
+                org_id=current_org_id
+            )
+            
+            if not smtp_result.get('success', False):
+                logger.error(f"❌ SMTP 발송 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {smtp_result.get('error')}")
+                mail.status = MailStatus.FAILED
+                
+                # 실패 로그 추가
+                fail_log = MailLog(
+                    mail_uuid=mail.mail_uuid,
+                    user_uuid=mail_user.user_uuid,
+                    action="SEND_FAILED",
+                    details=f"SMTP 발송 실패: {smtp_result.get('error')}"
+                )
+                db.add(fail_log)
+            else:
+                logger.info(f"✅ SMTP 발송 성공 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                
+        except Exception as smtp_error:
+            logger.error(f"❌ SMTP 발송 예외 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(smtp_error)}")
+            mail.status = MailStatus.FAILED
+            
+            # 실패 로그 추가
+            fail_log = MailLog(
+                mail_uuid=mail.mail_uuid,
+                user_uuid=mail_user.user_uuid,
+                action="SEND_FAILED",
+                details=f"SMTP 발송 예외: {str(smtp_error)}"
+            )
+            db.add(fail_log)
+            smtp_result = {'success': False, 'error': str(smtp_error)}
         
         db.commit()
         
-        logger.info(f"✅ 메일 발송 완료 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자 수: {len(recipients)}, 첨부파일 수: {len(attachment_list)}")
-        
-        return MailSendResponse(
-            success=True,
-            message="메일이 성공적으로 발송되었습니다.",
-            mail_uuid=mail.mail_uuid,
-            sent_at=mail.sent_at
-        )
+        # SMTP 발송 결과에 따라 응답 결정
+        if smtp_result.get('success', False):
+            logger.info(f"✅ 메일 발송 완료 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자 수: {len(recipients)}, 첨부파일 수: {len(attachment_list)}")
+            return MailSendResponse(
+                success=True,
+                message="메일이 성공적으로 발송되었습니다.",
+                mail_uuid=mail.mail_uuid,
+                sent_at=mail.sent_at
+            )
+        else:
+            logger.error(f"❌ 메일 발송 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {smtp_result.get('error')}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"메일 발송에 실패했습니다: {smtp_result.get('error', '알 수 없는 오류')}"
+            )
         
     except HTTPException:
         db.rollback()
@@ -311,6 +418,7 @@ async def send_mail_json(
                 
                 recipient = MailRecipient(
                     mail_uuid=mail.mail_uuid,
+                    recipient_uuid=recipient_user.user_uuid,  # 누락된 recipient_uuid 필드 추가
                     recipient_email=email,
                     recipient_type=RecipientType.TO.value
                 )
@@ -342,6 +450,7 @@ async def send_mail_json(
                 
                 recipient = MailRecipient(
                     mail_uuid=mail.mail_uuid,
+                    recipient_uuid=recipient_user.user_uuid,  # 누락된 recipient_uuid 필드 추가
                     recipient_email=email,
                     recipient_type=RecipientType.CC.value
                 )
@@ -373,6 +482,7 @@ async def send_mail_json(
                 
                 recipient = MailRecipient(
                     mail_uuid=mail.mail_uuid,
+                    recipient_uuid=recipient_user.user_uuid,  # 누락된 recipient_uuid 필드 추가
                     recipient_email=email,
                     recipient_type=RecipientType.BCC.value
                 )
@@ -390,7 +500,7 @@ async def send_mail_json(
         
         # 실제 메일 발송 (SMTP)
         try:
-            mail_service = MailService()
+            mail_service = MailService(db)
             smtp_result = await mail_service.send_email_smtp(
                 sender_email=mail_user.email,
                 recipient_emails=[r.recipient_email for r in recipients],
@@ -427,17 +537,25 @@ async def send_mail_json(
                 details=f"SMTP 발송 예외: {str(smtp_error)}"
             )
             db.add(fail_log)
+            smtp_result = {'success': False, 'error': str(smtp_error)}
         
         db.commit()
         
-        logger.info(f"✅ 메일 발송 완료 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자 수: {len(recipients)}")
-        
-        return MailSendResponse(
-            success=True,
-            message="메일이 성공적으로 발송되었습니다.",
-            mail_uuid=mail.mail_uuid,
-            sent_at=mail.sent_at
-        )
+        # SMTP 발송 결과에 따라 응답 결정
+        if smtp_result.get('success', False):
+            logger.info(f"✅ 메일 발송 완료 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자 수: {len(recipients)}")
+            return MailSendResponse(
+                success=True,
+                message="메일이 성공적으로 발송되었습니다.",
+                mail_uuid=mail.mail_uuid,
+                sent_at=mail.sent_at
+            )
+        else:
+            logger.error(f"❌ 메일 발송 실패 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {smtp_result.get('error')}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"메일 발송에 실패했습니다: {smtp_result.get('error', '알 수 없는 오류')}"
+            )
         
     except HTTPException:
         db.rollback()

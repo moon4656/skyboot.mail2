@@ -213,8 +213,15 @@ FastAPI 자동 생성 문서를 통해 API를 테스트할 수 있습니다:
 - SQL 인젝션 방지 (SQLAlchemy ORM)
 - 환경 변수를 통한 민감한 정보 관리
 
-## 🔧 포트 설정
 
+
+# postfix restart
+sudo systemctl restart postfix
+
+# postfix status
+sudo systemctl status postfix
+
+## 🔧 포트 설정
 ### 기본 포트
 
 - `5173`: 프론트엔드 (Vite 개발 서버)
