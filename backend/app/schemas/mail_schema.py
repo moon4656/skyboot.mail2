@@ -11,8 +11,10 @@ class RecipientType(str, Enum):
 
 class MailStatus(str, Enum):
     """메일 상태 열거형"""
-    DRAFT = "draft"
+    INBOX = "inbox"
     SENT = "sent"
+    DRAFT = "draft"
+    TRASH = "trash"
     FAILED = "failed"
 
 class MailPriority(str, Enum):
@@ -122,10 +124,11 @@ class MailResponse(MailBase):
     class Config:
         from_attributes = True
 
-class MailDetailResponse(MailResponse):
-    """메일 상세 응답 스키마"""
-    # MailResponse의 모든 필드를 상속받음
-    pass
+class MailDetailResponse(BaseModel):
+    """메일 상세 응답 스키마 - API 응답 형태"""
+    success: bool = Field(..., description="성공 여부")
+    data: Optional[dict] = Field(None, description="메일 상세 데이터")
+    message: Optional[str] = Field(None, description="응답 메시지")
 
 class MailListResponse(BaseModel):
     """메일 목록 응답 스키마"""
@@ -153,7 +156,30 @@ class FolderBase(BaseModel):
 
 class FolderCreate(FolderBase):
     """폴더 생성 스키마"""
-    pass
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "중요한 메일",
+                "folder_type": "custom",
+                "parent_id": 1
+            }
+        }
+
+class FolderUpdate(BaseModel):
+    """폴더 수정 스키마"""
+    name: Optional[str] = Field(None, max_length=100, description="폴더명")
+    folder_type: Optional[FolderType] = Field(None, description="폴더 타입")
+    parent_id: Optional[int] = Field(None, description="상위 폴더 ID")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "name": "업무 메일",
+                "folder_type": "custom",
+                "parent_id": 1
+            }
+        }
 
 class FolderResponse(FolderBase):
     """폴더 응답 스키마"""
@@ -248,6 +274,7 @@ class MailSearchRequest(BaseModel):
     recipient_email: Optional[str] = Field(None, description="수신자 이메일")
     subject: Optional[str] = Field(None, description="제목 검색")
     status: Optional[MailStatus] = Field(None, description="메일 상태")
+    folder_type: Optional[FolderType] = Field(None, description="폴더 타입 (inbox, sent, draft, trash)")
     priority: Optional[MailPriority] = Field(None, description="우선순위")
     date_from: Optional[datetime] = Field(None, description="시작 날짜")
     date_to: Optional[datetime] = Field(None, description="종료 날짜")
@@ -293,3 +320,25 @@ class MailStatsResponse(BaseModel):
     stats: MailStats = Field(..., description="메일 통계")
     success: bool = Field(True, description="성공 여부")
     message: str = Field("통계 조회 성공", description="응답 메시지")
+
+# 폴더 관련 응답 스키마
+class FolderInfo(BaseModel):
+    """폴더 정보 스키마"""
+    folder_uuid: str = Field(..., description="폴더 UUID")
+    name: str = Field(..., description="폴더명")
+    folder_type: FolderType = Field(..., description="폴더 타입")
+    mail_count: int = Field(..., description="폴더 내 메일 수")
+    created_at: datetime = Field(..., description="생성 시간")
+
+class FolderListResponse(BaseModel):
+    """폴더 목록 응답 스키마"""
+    folders: List[FolderInfo] = Field(..., description="폴더 목록")
+
+class FolderCreateResponse(BaseModel):
+    """폴더 생성 응답 스키마"""
+    id: int = Field(..., description="폴더 ID")
+    folder_uuid: str = Field(..., description="폴더 UUID")
+    name: str = Field(..., description="폴더명")
+    folder_type: FolderType = Field(..., description="폴더 타입")
+    mail_count: int = Field(..., description="폴더 내 메일 수")
+    created_at: datetime = Field(..., description="생성 시간")

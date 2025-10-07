@@ -92,10 +92,10 @@ def init_default_folders(db, user_uuid: str, org_id: str):
     import uuid
     
     default_folders = [
-        {"name": "받은편지함", "folder_type": FolderType.INBOX.value, "is_system": True},
-        {"name": "보낸편지함", "folder_type": FolderType.SENT.value, "is_system": True},
-        {"name": "임시보관함", "folder_type": FolderType.DRAFT.value, "is_system": True},
-        {"name": "휴지통", "folder_type": FolderType.TRASH.value, "is_system": True},
+        {"name": "INBOX", "folder_type": FolderType.INBOX.value, "is_system": True},
+        {"name": "SENT", "folder_type": FolderType.SENT.value, "is_system": True},
+        {"name": "DRAFT", "folder_type": FolderType.DRAFT.value, "is_system": True},
+        {"name": "TRASH", "folder_type": FolderType.TRASH.value, "is_system": True},
     ]
     
     try:

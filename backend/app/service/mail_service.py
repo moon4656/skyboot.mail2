@@ -603,7 +603,7 @@ class MailService:
                 ).filter(
                     Mail.org_id == org_id,
                     MailRecipient.recipient_uuid == mail_user.user_uuid,
-                    Mail.status != MailStatus.DELETED.value
+                    Mail.status != MailStatus.TRASH.value
                 )
             elif folder_type == "sent":
                 # 보낸 메일함
@@ -623,7 +623,7 @@ class MailService:
                 # 휴지통 - 삭제된 메일만 조회
                 query = self.db.query(Mail).filter(
                     Mail.org_id == org_id,
-                    Mail.status == MailStatus.DELETED.value,
+                    Mail.status == MailStatus.TRASH.value,
                     or_(
                         Mail.sender_uuid == mail_user.user_uuid,
                         Mail.mail_uuid.in_(
@@ -768,15 +768,15 @@ class MailService:
                 MailAttachment.mail_uuid == mail_uuid
             ).all()
             
-            # 읽음 처리 (수신자인 경우)
+            # 읽음 처리 (수신자인 경우) - MailInFolder에서 처리
             if is_recipient:
-                recipient_record = self.db.query(MailRecipient).filter(
-                    MailRecipient.mail_uuid == mail_uuid,
-                    MailRecipient.recipient_email == mail_user.email
+                mail_in_folder = self.db.query(MailInFolder).filter(
+                    MailInFolder.mail_uuid == mail_uuid,
+                    MailInFolder.user_uuid == mail_user.user_uuid
                 ).first()
-                if recipient_record and not recipient_record.is_read:
-                    recipient_record.is_read = True
-                    recipient_record.read_at = datetime.now(timezone.utc)
+                if mail_in_folder and not mail_in_folder.is_read:
+                    mail_in_folder.is_read = True
+                    mail_in_folder.read_at = datetime.now(timezone.utc)
                     self.db.commit()
             
             # 메일 읽기 로그 기록
@@ -804,8 +804,8 @@ class MailService:
                     {
                         "email": r.recipient_email,
                         "type": r.recipient_type,
-                        "is_read": r.is_read,
-                        "read_at": r.read_at.isoformat() if r.read_at else None
+                        "is_read": False,  # MailRecipient에는 is_read가 없음, MailInFolder에서 관리
+                        "read_at": None    # MailRecipient에는 read_at가 없음, MailInFolder에서 관리
                     } for r in recipients
                 ],
                 "attachments": [
@@ -879,33 +879,63 @@ class MailService:
             if not (is_sender or recipient_record):
                 raise HTTPException(status_code=403, detail="메일을 삭제할 권한이 없습니다.")
             
+            # 메일 로그 기록 (영구 삭제가 아닌 경우만)
+            if not permanent:
+                mail_log = MailLog(
+                    mail_uuid=mail_uuid,
+                    user_uuid=mail_user.user_uuid,
+                    action="delete",
+                    details=f"메일 삭제 - 사용자: {mail_user.email}",
+                    ip_address=None,  # TODO: 실제 요청에서 IP 주소 전달 필요
+                    user_agent=None   # TODO: 실제 요청에서 User-Agent 전달 필요
+                )
+                self.db.add(mail_log)
+            
             if permanent:
                 # 영구 삭제
                 if is_sender:
                     # 발송자인 경우 메일 자체를 삭제
+                    # 1. 먼저 mail_logs 테이블의 관련 레코드들을 삭제
+                    mail_log_records = self.db.query(MailLog).filter(
+                        MailLog.mail_uuid == mail_uuid
+                    ).all()
+                    
+                    for log_record in mail_log_records:
+                        self.db.delete(log_record)
+                        logger.debug(f"🗑️ mail_logs 레코드 삭제 - 메일 UUID: {mail_uuid}, 로그 ID: {log_record.id}")
+                    
+                    # 2. mail_recipients 테이블의 관련 레코드들을 삭제
+                    mail_recipient_records = self.db.query(MailRecipient).filter(
+                        MailRecipient.mail_uuid == mail_uuid
+                    ).all()
+                    
+                    for recipient_record in mail_recipient_records:
+                        self.db.delete(recipient_record)
+                        logger.debug(f"🗑️ mail_recipients 레코드 삭제 - 메일 UUID: {mail_uuid}, 수신자: {recipient_record.recipient_email}")
+                    
+                    # 3. mail_in_folders 테이블의 관련 레코드들을 삭제
+                    mail_in_folder_records = self.db.query(MailInFolder).filter(
+                        MailInFolder.mail_uuid == mail_uuid
+                    ).all()
+                    
+                    for record in mail_in_folder_records:
+                        self.db.delete(record)
+                        logger.debug(f"🗑️ mail_in_folders 레코드 삭제 - 메일 UUID: {mail_uuid}, 폴더 UUID: {record.folder_uuid}")
+                    
+                    # 4. 그 다음 메일 자체를 삭제
                     self.db.delete(mail)
+                    logger.info(f"🗑️ 메일 영구 삭제 완료 - 메일 UUID: {mail_uuid}")
                 else:
                     # 수신자인 경우 수신자 레코드만 삭제
                     self.db.delete(recipient_record)
             else:
                 # 소프트 삭제 (휴지통으로 이동)
                 if is_sender:
-                    mail.status = MailStatus.DELETED.value
+                    mail.status = MailStatus.TRASH.value
                     mail.deleted_at = datetime.now(timezone.utc)
                 else:
                     recipient_record.is_deleted = True
                     recipient_record.deleted_at = datetime.now(timezone.utc)
-            
-            # 메일 로그 기록
-            mail_log = MailLog(
-                mail_uuid=mail_uuid,
-                user_uuid=mail_user.user_uuid,
-                action="delete" if not permanent else "permanent_delete",
-                details=f"메일 {'영구 ' if permanent else ''}삭제 - 사용자: {mail_user.email}",
-                ip_address=None,  # TODO: 실제 요청에서 IP 주소 전달 필요
-                user_agent=None   # TODO: 실제 요청에서 User-Agent 전달 필요
-            )
-            self.db.add(mail_log)
             
             self.db.commit()
             
@@ -963,7 +993,7 @@ class MailService:
             received_count = self.db.query(func.count(MailRecipient.mail_uuid)).join(Mail).filter(
                 Mail.org_id == org_id,
                 MailRecipient.recipient_uuid == mail_user.user_uuid,
-                Mail.status != MailStatus.DELETED.value
+                Mail.status != MailStatus.TRASH.value
             ).scalar()
             
             # 읽지 않은 메일 수
@@ -971,7 +1001,7 @@ class MailService:
                 Mail.org_id == org_id,
                 MailRecipient.recipient_uuid == mail_user.user_uuid,
                 MailRecipient.is_read == False,
-                Mail.status != MailStatus.DELETED.value
+                Mail.status != MailStatus.TRASH.value
             ).scalar()
             
             # 임시보관함 메일 수
@@ -985,7 +1015,7 @@ class MailService:
             trash_count = self.db.query(func.count(Mail.mail_uuid)).filter(
                 Mail.org_id == org_id,
                 or_(
-                    and_(Mail.sender_uuid == mail_user.user_uuid, Mail.status == MailStatus.DELETED.value),
+                    and_(Mail.sender_uuid == mail_user.user_uuid, Mail.status == MailStatus.TRASH.value),
                     and_(
                         Mail.mail_uuid.in_(
                             self.db.query(MailRecipient.mail_uuid).filter(

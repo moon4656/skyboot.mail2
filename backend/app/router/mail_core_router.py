@@ -16,6 +16,7 @@ from ..database.user import get_db
 from ..model.user_model import User
 from ..model.mail_model import FolderType, Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog, generate_mail_uuid
 from ..schemas.mail_schema import (
+    APIResponse,
     MailSendRequest,
     MailResponse,
     MailListResponse,
@@ -107,6 +108,7 @@ async def send_mail(
     subject: str = Form(..., description="메일 제목"),
     content: str = Form(..., description="메일 내용"),
     priority: MailPriority = Form(MailPriority.NORMAL, description="메일 우선순위"),
+    is_draft: Optional[str] = Form("false", description="임시보관함 여부 (true/false)"),
     current_user: User = Depends(get_current_user),
     current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db),
@@ -128,6 +130,9 @@ async def send_mail(
         if not mail_user:
             raise HTTPException(status_code=404, detail="Mail user not found in this organization")
         
+        # is_draft 파라미터 처리
+        is_draft_bool = is_draft.lower() == "true" if is_draft else False
+        
         # 메일 생성 (조직 ID 포함) - 년월일_시분초_uuid[12] 형식
         from ..model.mail_model import generate_mail_uuid
         mail_uuid = generate_mail_uuid()
@@ -138,10 +143,10 @@ async def send_mail(
             subject=subject,
             body_text=content,
             priority=priority,
-            status=MailStatus.SENT,
-            is_draft=False,
+            status=MailStatus.DRAFT if is_draft_bool else MailStatus.SENT,
+            is_draft=is_draft_bool,
             created_at=datetime.utcnow(),
-            sent_at=datetime.utcnow(),
+            sent_at=None if is_draft_bool else datetime.utcnow(),
             message_id=str(uuid.uuid4())
         )
         
@@ -311,34 +316,68 @@ async def send_mail(
         )
         db.add(mail_log)
         
-        # 실제 메일 발송 (SMTP)
-        smtp_result = {'success': False, 'error': '알 수 없는 오류'}
+        # 먼저 메일과 수신자 정보를 커밋 (외래키 제약 조건 해결)
         try:
-            mail_service = MailService(db)
+            db.commit()
+            logger.info(f"💾 메일 및 수신자 정보 저장 완료 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+        except Exception as commit_error:
+            db.rollback()
+            logger.error(f"❌ 메일 저장 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(commit_error)}")
+            raise HTTPException(status_code=500, detail=f"메일 저장에 실패했습니다: {str(commit_error)}")
+        
+        # 실제 메일 발송 (SMTP) - 임시보관함이 아닌 경우에만
+        smtp_result = {'success': True, 'error': None}  # 임시보관함의 경우 기본값
+        if not is_draft_bool:
+            try:
+                mail_service = MailService(db)
+                
+                # 첨부파일 정보를 메일 서비스 형식으로 변환
+                attachment_data = []
+                if attachment_list:
+                    for attachment in attachment_list:
+                        attachment_data.append({
+                            "filename": attachment.filename,
+                            "file_path": attachment.file_path,
+                            "file_size": attachment.file_size,
+                            "content_type": attachment.content_type
+                        })
+                
+                smtp_result = await mail_service.send_email_smtp(
+                    sender_email=mail_user.email,
+                    recipient_emails=[r.recipient_email for r in recipients],
+                    subject=subject,
+                    body_text=content,
+                    body_html=None,  # Form 데이터에서는 HTML 본문이 없음
+                    org_id=current_org_id,
+                    attachments=attachment_data if attachment_data else None
+                )
             
-            # 첨부파일 정보를 메일 서비스 형식으로 변환
-            attachment_data = []
-            if attachment_list:
-                for attachment in attachment_list:
-                    attachment_data.append({
-                        "filename": attachment.filename,
-                        "file_path": attachment.file_path,
-                        "file_size": attachment.file_size,
-                        "content_type": attachment.content_type
-                    })
-            
-            smtp_result = await mail_service.send_email_smtp(
-                sender_email=mail_user.email,
-                recipient_emails=[r.recipient_email for r in recipients],
-                subject=subject,
-                body_text=content,
-                body_html=None,  # Form 데이터에서는 HTML 본문이 없음
-                org_id=current_org_id,
-                attachments=attachment_data if attachment_data else None
-            )
-            
-            if not smtp_result.get('success', False):
-                logger.error(f"❌ SMTP 발송 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {smtp_result.get('error')}")
+                # SMTP 발송 결과 디버깅
+                logger.info(f"🔍 SMTP 발송 결과 디버깅 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                logger.info(f"🔍 SMTP 결과 타입: {type(smtp_result)}")
+                logger.info(f"🔍 SMTP 결과 전체: {smtp_result}")
+                logger.info(f"🔍 SMTP success 값: {smtp_result.get('success')}")
+                logger.info(f"🔍 SMTP success 타입: {type(smtp_result.get('success'))}")
+                logger.info(f"🔍 SMTP success 조건 결과: {smtp_result.get('success', False)}")
+                logger.info(f"🔍 NOT 조건 결과: {not smtp_result.get('success', False)}")
+                
+                if not smtp_result.get('success', False):
+                    logger.error(f"❌ SMTP 발송 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {smtp_result.get('error')}")
+                    mail.status = MailStatus.FAILED
+                    
+                    # 실패 로그 추가
+                    fail_log = MailLog(
+                        mail_uuid=mail.mail_uuid,
+                        user_uuid=mail_user.user_uuid,
+                        action="SEND_FAILED",
+                        details=f"SMTP 발송 실패: {smtp_result.get('error')}"
+                    )
+                    db.add(fail_log)
+                else:
+                    logger.info(f"✅ SMTP 발송 성공 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                    
+            except Exception as smtp_error:
+                logger.error(f"❌ SMTP 발송 예외 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(smtp_error)}")
                 mail.status = MailStatus.FAILED
                 
                 # 실패 로그 추가
@@ -346,27 +385,91 @@ async def send_mail(
                     mail_uuid=mail.mail_uuid,
                     user_uuid=mail_user.user_uuid,
                     action="SEND_FAILED",
-                    details=f"SMTP 발송 실패: {smtp_result.get('error')}"
+                    details=f"SMTP 발송 예외: {str(smtp_error)}"
                 )
                 db.add(fail_log)
-            else:
-                logger.info(f"✅ SMTP 발송 성공 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
-                
-        except Exception as smtp_error:
-            logger.error(f"❌ SMTP 발송 예외 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(smtp_error)}")
-            mail.status = MailStatus.FAILED
-            
-            # 실패 로그 추가
-            fail_log = MailLog(
-                mail_uuid=mail.mail_uuid,
-                user_uuid=mail_user.user_uuid,
-                action="SEND_FAILED",
-                details=f"SMTP 발송 예외: {str(smtp_error)}"
-            )
-            db.add(fail_log)
-            smtp_result = {'success': False, 'error': str(smtp_error)}
+                smtp_result = {'success': False, 'error': str(smtp_error)}
+        else:
+            logger.info(f"📝 임시보관함 메일 생성 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
         
-        db.commit()
+        # 메일 폴더 할당 처리 (임시보관함 또는 보낸편지함)
+        try:
+            if is_draft_bool:
+                # 임시보관함 폴더 조회
+                draft_folder = db.query(MailFolder).filter(
+                    and_(
+                        MailFolder.user_uuid == mail_user.user_uuid,
+                        MailFolder.org_id == current_org_id,
+                        MailFolder.folder_type == FolderType.DRAFT
+                    )
+                ).first()
+                
+                if draft_folder:
+                    # 이미 할당되어 있는지 확인
+                    existing_relation = db.query(MailInFolder).filter(
+                        and_(
+                            MailInFolder.mail_uuid == mail.mail_uuid,
+                            MailInFolder.folder_uuid == draft_folder.folder_uuid
+                        )
+                    ).first()
+                    
+                    if not existing_relation:
+                        # 발신자의 임시보관함에 메일 할당
+                        mail_in_folder = MailInFolder(
+                            mail_uuid=mail.mail_uuid,
+                            folder_uuid=draft_folder.folder_uuid,
+                            user_uuid=mail_user.user_uuid
+                        )
+                        db.add(mail_in_folder)
+                        logger.info(f"📁 메일을 발신자 임시보관함에 할당 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                    else:
+                        logger.debug(f"📁 메일이 이미 임시보관함에 할당됨 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                else:
+                    logger.warning(f"⚠️ 발신자 임시보관함을 찾을 수 없음 - 조직: {current_org_id}, 사용자: {mail_user.user_uuid}")
+            else:
+                # 발신자의 보낸편지함 조회
+                sent_folder = db.query(MailFolder).filter(
+                    and_(
+                        MailFolder.user_uuid == mail_user.user_uuid,
+                        MailFolder.org_id == current_org_id,
+                        MailFolder.folder_type == FolderType.SENT
+                    )
+                ).first()
+                
+                if sent_folder:
+                    # 이미 할당되어 있는지 확인
+                    existing_relation = db.query(MailInFolder).filter(
+                        and_(
+                            MailInFolder.mail_uuid == mail.mail_uuid,
+                            MailInFolder.folder_uuid == sent_folder.folder_uuid
+                        )
+                    ).first()
+                    
+                    if not existing_relation:
+                        # 발신자의 보낸편지함에 메일 할당
+                        mail_in_folder = MailInFolder(
+                            mail_uuid=mail.mail_uuid,
+                            folder_uuid=sent_folder.folder_uuid,
+                            user_uuid=mail_user.user_uuid
+                        )
+                        db.add(mail_in_folder)
+                        logger.info(f"📁 메일을 발신자 보낸편지함에 할당 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                    else:
+                        logger.debug(f"📁 메일이 이미 보낸편지함에 할당됨 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                else:
+                    logger.warning(f"⚠️ 발신자 보낸편지함을 찾을 수 없음 - 조직: {current_org_id}, 사용자: {mail_user.user_uuid}")
+                
+        except Exception as folder_error:
+            logger.error(f"❌ 폴더 할당 중 오류 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(folder_error)}")
+            # 폴더 할당 실패는 메일 발송 실패로 처리하지 않음
+        
+        # 폴더 할당 정보 커밋
+        try:
+            db.commit()
+            logger.info(f"📁 폴더 할당 완료 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+        except Exception as folder_commit_error:
+            logger.error(f"❌ 폴더 할당 커밋 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(folder_commit_error)}")
+            # 폴더 할당 실패는 메일 발송 실패로 처리하지 않음
         
         # SMTP 발송 결과에 따라 응답 결정
         if smtp_result.get('success', False):
@@ -539,6 +642,15 @@ async def send_mail_json(
         )
         db.add(mail_log)
         
+        # 먼저 메일과 수신자 정보를 커밋
+        try:
+            db.commit()
+            logger.info(f"💾 메일 및 수신자 정보 저장 완료 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+        except Exception as commit_error:
+            db.rollback()
+            logger.error(f"❌ 메일 저장 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(commit_error)}")
+            raise HTTPException(status_code=500, detail=f"메일 저장에 실패했습니다: {str(commit_error)}")
+
         # 실제 메일 발송 (SMTP)
         try:
             mail_service = MailService(db)
@@ -553,6 +665,7 @@ async def send_mail_json(
             
             if not smtp_result.get('success', False):
                 logger.error(f"❌ SMTP 발송 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {smtp_result.get('error')}")
+                # 메일 상태를 실패로 업데이트
                 mail.status = MailStatus.FAILED
                 
                 # 실패 로그 추가
@@ -563,11 +676,13 @@ async def send_mail_json(
                     details=f"SMTP 발송 실패: {smtp_result.get('error')}"
                 )
                 db.add(fail_log)
+                db.commit()
             else:
                 logger.info(f"✅ SMTP 발송 성공 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
                 
         except Exception as smtp_error:
             logger.error(f"❌ SMTP 발송 예외 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(smtp_error)}")
+            # 메일 상태를 실패로 업데이트
             mail.status = MailStatus.FAILED
             
             # 실패 로그 추가
@@ -578,12 +693,57 @@ async def send_mail_json(
                 details=f"SMTP 발송 예외: {str(smtp_error)}"
             )
             db.add(fail_log)
+            db.commit()
             smtp_result = {'success': False, 'error': str(smtp_error)}
         
-        db.commit()
+        # SMTP 발송 결과에 따라 처리 분기
+        logger.info(f"🔍 SMTP 발송 결과 디버깅 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+        logger.info(f"🔍 SMTP 결과 타입: {type(smtp_result)}")
+        logger.info(f"🔍 SMTP 결과 전체: {smtp_result}")
+        logger.info(f"🔍 SMTP success 값: {smtp_result.get('success')}")
+        logger.info(f"🔍 SMTP success 타입: {type(smtp_result.get('success'))}")
+        logger.info(f"🔍 SMTP success 조건 결과: {smtp_result.get('success', False)}")
         
-        # SMTP 발송 결과에 따라 응답 결정
         if smtp_result.get('success', False):
+            # SMTP 발송 성공 시 폴더 할당 처리
+            try:
+                # 발신자의 보낸편지함 조회
+                sent_folder = db.query(MailFolder).filter(
+                    and_(
+                        MailFolder.user_uuid == mail_user.user_uuid,
+                        MailFolder.org_id == current_org_id,
+                        MailFolder.folder_type == FolderType.SENT
+                    )
+                ).first()
+                
+                if sent_folder:
+                    # 이미 할당되어 있는지 확인
+                    existing_relation = db.query(MailInFolder).filter(
+                        and_(
+                            MailInFolder.mail_uuid == mail.mail_uuid,
+                            MailInFolder.folder_uuid == sent_folder.folder_uuid
+                        )
+                    ).first()
+                    
+                    if not existing_relation:
+                        # 발신자의 보낸편지함에 메일 할당
+                        mail_in_folder = MailInFolder(
+                            mail_uuid=mail.mail_uuid,
+                            folder_uuid=sent_folder.folder_uuid,
+                            user_uuid=mail_user.user_uuid
+                        )
+                        db.add(mail_in_folder)
+                        db.commit()
+                        logger.info(f"📁 메일을 발신자 보낸편지함에 할당 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                    else:
+                        logger.debug(f"📁 메일이 이미 보낸편지함에 할당됨 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                else:
+                    logger.warning(f"⚠️ 발신자 보낸편지함을 찾을 수 없음 (JSON) - 조직: {current_org_id}, 사용자: {mail_user.user_uuid}")
+                    
+            except Exception as folder_error:
+                logger.error(f"❌ 폴더 할당 중 오류 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(folder_error)}")
+                # 폴더 할당 실패는 메일 발송 실패로 처리하지 않음
+            
             logger.info(f"✅ 메일 발송 완료 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자 수: {len(recipients)}")
             return MailSendResponse(
                 success=True,
@@ -688,15 +848,15 @@ async def get_inbox_mails(
             
             # 수신자 정보
             recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-            to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO and r.recipient]
-            cc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.CC and r.recipient]
-            bcc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.BCC and r.recipient]
+            to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
+            cc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.CC]
+            bcc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.BCC]
             
-            # 현재 사용자의 read_at 정보 조회
-            current_recipient = db.query(MailRecipient).filter(
+            # 현재 사용자의 읽음 상태 조회 (MailInFolder에서)
+            mail_in_folder = db.query(MailInFolder).filter(
                 and_(
-                    MailRecipient.mail_uuid == mail.mail_uuid,
-                    MailRecipient.recipient_uuid == mail_user.user_uuid
+                    MailInFolder.mail_uuid == mail.mail_uuid,
+                    MailInFolder.user_uuid == mail_user.user_uuid
                 )
             ).first()
             
@@ -724,7 +884,7 @@ async def get_inbox_mails(
                 sender=sender_info,
                 recipient_count=len(recipients),
                 attachment_count=attachment_count,
-                is_read=current_recipient.read_at is not None if current_recipient else None
+                is_read=mail_in_folder.is_read if mail_in_folder else False
             )
             mail_list.append(mail_response)
         
@@ -781,9 +941,9 @@ async def get_inbox_mail_detail(
         
         # 수신자 정보
         recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-        to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO and r.recipient]
-        cc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.CC and r.recipient]
-        bcc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.BCC and r.recipient]
+        to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
+        cc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.CC]
+        bcc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.BCC]
         
         # 첨부파일 정보
         attachments = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).all()
@@ -821,6 +981,7 @@ async def get_inbox_mail_detail(
         
         return MailDetailResponse(
             success=True,
+            message="메일 상세 조회 성공",
             data={
                 "mail_uuid": mail.mail_uuid,       
                 "subject": mail.subject,
@@ -1005,6 +1166,7 @@ async def get_sent_mail_detail(
         
         return MailDetailResponse(
             success=True,
+            message="보낸 메일 상세 조회 성공",
             data={
                 "mail_uuid": mail.mail_uuid,
                 "subject": mail.subject,
@@ -1129,20 +1291,34 @@ async def get_draft_mails(
 @router.get("/drafts/{mail_uuid}", response_model=MailDetailResponse, summary="임시보관함 메일 상세 조회")
 async def get_draft_mail_detail(
     mail_uuid: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
 ) -> MailDetailResponse:
     """임시보관함 메일 상세 조회"""
     try:
-        # 메일 조회
-        mail = db.query(Mail).filter(Mail.mail_uuid == mail_uuid).first()
-        if not mail:
-            raise HTTPException(status_code=404, detail="Mail not found")
+        logger.info(f"📧 get_draft_mail_detail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
-        # 메일 사용자 조회
-        mail_user = db.query(MailUser).filter(MailUser.user_uuid == current_user.user_uuid).first()
-        if not mail_user or mail.sender_uuid != mail_user.user_uuid:
-            raise HTTPException(status_code=403, detail="Access denied")
+        # 메일 사용자 조회 (조직별 필터링)
+        mail_user = db.query(MailUser).filter(
+            and_(
+                MailUser.user_uuid == current_user.user_uuid,
+                MailUser.org_id == current_org_id
+            )
+        ).first()
+        if not mail_user:
+            raise HTTPException(status_code=404, detail="해당 조직에서 메일 사용자를 찾을 수 없습니다")
+        
+        # 메일 조회 (조직별 필터링 및 발신자 확인)
+        mail = db.query(Mail).filter(
+            and_(
+                Mail.mail_uuid == mail_uuid,
+                Mail.org_id == current_org_id,
+                Mail.sender_uuid == mail_user.user_uuid
+            )
+        ).first()
+        if not mail:
+            raise HTTPException(status_code=404, detail="임시보관함 메일을 찾을 수 없거나 접근 권한이 없습니다")
         
         # 수신자 정보
         recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()    
@@ -1161,8 +1337,11 @@ async def get_draft_mail_detail(
                 "content_type": attachment.content_type
             })
         
+        logger.info(f"✅ get_draft_mail_detail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
+        
         return MailDetailResponse(
             success=True,
+            message="임시보관함 메일 상세 조회 성공",
             data={
                 "mail_uuid": mail.mail_uuid,
                 "subject": mail.subject,
@@ -1180,8 +1359,10 @@ async def get_draft_mail_detail(
             }
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error fetching draft mail detail: {str(e)}")
+        logger.error(f"❌ get_draft_mail_detail 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"임시보관함 메일 상세 조회 중 오류가 발생했습니다: {str(e)}")
 
 
@@ -1255,26 +1436,44 @@ async def get_deleted_mails(
         for mail in mails:
             # 발신자 정보
             sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
-            sender_email = sender.email if sender else "Unknown"
+            sender_response = None
+            if sender:
+                sender_response = MailUserResponse(
+                    user_uuid=sender.user_uuid,
+                    email=sender.email,
+                    display_name=sender.display_name,
+                    is_active=sender.is_active,
+                    created_at=sender.created_at,
+                    updated_at=sender.updated_at
+                )
             
-            # 수신자 정보
-            recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()    
-            to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO and r.recipient]
+            # 수신자 개수
+            recipient_count = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).count()
             
             # 첨부파일 개수
             attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).count()
             
-            mail_response = MailResponse(
+            # 읽음 상태 확인 (수신자인 경우)
+            is_read = None
+            if mail.sender_uuid != mail_user.user_uuid:
+                recipient_record = db.query(MailRecipient).filter(
+                    MailRecipient.mail_uuid == mail.mail_uuid,
+                    MailRecipient.recipient_uuid == mail_user.user_uuid
+                ).first()
+                is_read = recipient_record.is_read if recipient_record else None
+            
+            mail_response = MailListResponse(
                 mail_uuid=mail.mail_uuid,
                 subject=mail.subject,
-                sender_email=sender_email,
-                to_emails=to_emails,
-                status=mail.status,
-                priority=mail.priority,
-                has_attachments=attachment_count > 0,
-                created_at=mail.created_at,
+                status=MailStatus(mail.status),
+                is_draft=mail.status == MailStatus.DRAFT.value,
+                priority=MailPriority(mail.priority),
                 sent_at=mail.sent_at,
-                read_at=None  # Mail 모델에는 read_at 필드가 없음
+                created_at=mail.created_at,
+                sender=sender_response,
+                recipient_count=recipient_count,
+                attachment_count=attachment_count,
+                is_read=is_read
             )
             mail_list.append(mail_response)
         
@@ -1340,9 +1539,9 @@ async def get_trash_mail_detail(
         
         # 수신자 정보
         recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-        to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
-        cc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.CC]
-        bcc_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.BCC]
+        to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
+        cc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.CC]
+        bcc_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.BCC]
         
         # 첨부파일 정보
         attachments = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).all()
@@ -1359,8 +1558,9 @@ async def get_trash_mail_detail(
         
         return MailDetailResponse(
             success=True,
+            message="휴지통 메일 상세 조회 성공",
             data={
-                "id": mail.mail_uuid,
+                "mail_uuid": mail.mail_uuid,
                 "subject": mail.subject,
                 "content": mail.body_text,
                 "sender_email": sender_email,
@@ -1465,3 +1665,55 @@ async def download_attachment(
     except Exception as e:
         logger.error(f"❌ download_attachment 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 첨부파일ID: {attachment_id}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"첨부파일 다운로드 중 오류가 발생했습니다: {str(e)}")
+
+
+@router.delete("/{mail_uuid}", response_model=Dict[str, Any], summary="메일 삭제")
+async def delete_mail(
+    mail_uuid: str,
+    permanent: bool = Query(False, description="영구 삭제 여부"),
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    메일을 삭제합니다.
+    
+    - **mail_uuid**: 삭제할 메일의 UUID
+    - **permanent**: True면 영구 삭제, False면 휴지통으로 이동 (기본값: False)
+    """
+    try:
+        logger.info(f"🗑️ delete_mail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 영구삭제: {permanent}")
+        
+        # 메일 서비스 인스턴스 생성
+        mail_service = MailService(db)
+        
+        # 메일 삭제 실행
+        success = await mail_service.delete_mail(
+            org_id=current_org_id,
+            user_uuid=current_user.user_uuid,
+            mail_uuid=mail_uuid,
+            permanent=permanent
+        )
+        
+        if success:
+            action_type = "영구 삭제" if permanent else "휴지통으로 이동"
+            logger.info(f"✅ delete_mail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 작업: {action_type}")
+            
+            return {
+                "success": True,
+                "message": f"메일이 성공적으로 {action_type}되었습니다.",
+                "data": {"mail_uuid": mail_uuid, "permanent": permanent}
+            }
+        else:
+            logger.warning(f"⚠️ delete_mail 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
+            return {
+                "success": False,
+                "message": "메일 삭제에 실패했습니다.",
+                "data": {}
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ delete_mail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 에러: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"메일 삭제 중 오류가 발생했습니다: {str(e)}")

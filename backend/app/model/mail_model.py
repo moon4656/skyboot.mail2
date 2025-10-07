@@ -98,7 +98,7 @@ class Mail(Base):
     message_id = Column(String(255), comment="메시지 ID")
     in_reply_to = Column(String(255), comment="답장 대상 메시지 ID")
     references = Column(Text, comment="참조 메시지 ID들")
-    sent_at = Column(DateTime(timezone=True), comment="발송 시간")
+    sent_at = Column(DateTime(timezone=True), nullable=True, comment="발송 시간")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="생성 시간")
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), comment="수정 시간")
     
@@ -169,6 +169,8 @@ class MailInFolder(Base):
     mail_uuid = Column(String(50), ForeignKey("mails.mail_uuid"), nullable=False, comment="메일 UUID (mails.mail_uuid 참조)")
     folder_uuid = Column(String(36), ForeignKey("mail_folders.folder_uuid"), nullable=False, comment="폴더 UUID")
     user_uuid = Column(String(36), ForeignKey("mail_users.user_uuid"), nullable=False, comment="사용자 UUID")
+    is_read = Column(Boolean, default=False, comment="읽음 상태")
+    read_at = Column(DateTime(timezone=True), comment="읽은 시간")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="생성 시간")
     
     # 관계 설정

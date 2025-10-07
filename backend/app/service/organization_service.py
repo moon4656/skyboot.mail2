@@ -950,6 +950,8 @@ class OrganizationService:
         Returns:
             생성된 메일 사용자
         """
+        from ..model.mail_model import MailFolder, FolderType
+        
         # 사용자 정보 조회
         user = self.db.query(User).filter(User.user_id == user_id).first()
         if not user:
@@ -970,7 +972,59 @@ class OrganizationService:
         self.db.flush()
         
         logger.info(f"✅ 메일 사용자 생성: {email} (ID: {mail_user.user_id})")
+        
+        # 기본 메일 폴더들 생성
+        await self._create_default_mail_folders(user.user_uuid, org_id)
+        
         return mail_user
+    
+    async def _create_default_mail_folders(self, user_uuid: str, org_id: str):
+        """
+        사용자의 기본 메일 폴더들을 생성합니다.
+        
+        Args:
+            user_uuid: 사용자 UUID
+            org_id: 조직 ID
+        """
+        from ..model.mail_model import MailFolder, FolderType
+        
+        # 기본 폴더 정의
+        default_folders = [
+            {"name": "INBOX", "folder_type": FolderType.INBOX, "is_system": True},
+            {"name": "SENT", "folder_type": FolderType.SENT, "is_system": True},
+            {"name": "DRAFT", "folder_type": FolderType.DRAFT, "is_system": True},
+            {"name": "TRASH", "folder_type": FolderType.TRASH, "is_system": True}
+        ]
+        
+        created_folders = []
+        
+        for folder_info in default_folders:
+            # 이미 존재하는 폴더인지 확인
+            existing_folder = self.db.query(MailFolder).filter(
+                MailFolder.user_uuid == user_uuid,
+                MailFolder.org_id == org_id,
+                MailFolder.folder_type == folder_info["folder_type"]
+            ).first()
+            
+            if not existing_folder:
+                folder = MailFolder(
+                    folder_uuid=str(uuid.uuid4()),
+                    user_uuid=user_uuid,
+                    org_id=org_id,
+                    name=folder_info["name"],
+                    folder_type=folder_info["folder_type"],
+                    is_system=folder_info["is_system"],
+                    created_at=datetime.now(timezone.utc)
+                )
+                
+                self.db.add(folder)
+                created_folders.append(folder_info["name"])
+        
+        if created_folders:
+            self.db.flush()
+            logger.info(f"📁 기본 메일 폴더 생성 완료 - 사용자: {user_uuid}, 폴더: {created_folders}")
+        else:
+            logger.info(f"📁 기본 메일 폴더 이미 존재 - 사용자: {user_uuid}")
     
     async def _apply_default_settings(self, org_id: str) -> None:
         """

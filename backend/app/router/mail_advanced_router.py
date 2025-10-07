@@ -18,7 +18,7 @@ from ..model.mail_model import (
     Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, 
     MailLog
 )
-# 스키마 import 제거 - 기본 타입 사용
+from ..schemas.mail_schema import FolderListResponse, FolderCreateResponse, FolderCreate, FolderUpdate
 from ..service.auth_service import get_current_user
 from ..middleware.tenant_middleware import get_current_org_id
 
@@ -36,12 +36,12 @@ os.makedirs(BACKUP_DIR, exist_ok=True)
 
 # ===== 폴더 관리 =====
 
-@router.get("/folders", response_model=None, summary="폴더 목록 조회")
+@router.get("/folders", response_model=FolderListResponse, summary="폴더 목록 조회")
 async def get_folders(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id)
-) -> dict:
+) -> FolderListResponse:
     """사용자의 모든 폴더 조회"""
     try:
         logger.info(f"📁 get_folders 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
@@ -77,7 +77,7 @@ async def get_folders(
         
         logger.info(f"✅ get_folders 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더 수: {len(folder_list)}")
         
-        return {"folders": folder_list}
+        return FolderListResponse(folders=folder_list)
         
     except HTTPException:
         raise
@@ -86,16 +86,16 @@ async def get_folders(
         raise HTTPException(status_code=500, detail=f"폴더 조회 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.post("/folders", response_model=None, summary="폴더 생성")
+@router.post("/folders", response_model=FolderCreateResponse, summary="폴더 생성")
 async def create_folder(
-    folder_data: dict,
+    folder_data: FolderCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id)
-) -> dict:
+) -> FolderCreateResponse:
     """새 폴더 생성"""
     try:
-        logger.info(f"📁 create_folder 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {folder_data.get('name')}")
+        logger.info(f"📁 create_folder 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {folder_data.name}")
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
@@ -111,7 +111,7 @@ async def create_folder(
         existing_folder = db.query(MailFolder).filter(
             MailFolder.user_uuid == mail_user.user_uuid,
             MailFolder.org_id == current_org_id,
-            MailFolder.name == folder_data.get('name')
+            MailFolder.name == folder_data.name
         ).first()
         
         if existing_folder:
@@ -125,8 +125,9 @@ async def create_folder(
             folder_uuid=folder_uuid,
             user_uuid=mail_user.user_uuid,
             org_id=current_org_id,
-            name=folder_data.get('name'),
-            folder_type=folder_data.get('folder_type', 'custom')
+            name=folder_data.name,
+            folder_type=folder_data.folder_type,
+            parent_id=folder_data.parent_id  # parent_id 추가
         )
         
         db.add(new_folder)
@@ -135,27 +136,27 @@ async def create_folder(
         
         logger.info(f"✅ create_folder 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {new_folder.name}, 폴더 UUID: {new_folder.folder_uuid}")
         
-        return {
-            "id": new_folder.id,
-            "folder_uuid": new_folder.folder_uuid,
-            "name": new_folder.name,
-            "folder_type": new_folder.folder_type,
-            "mail_count": 0,
-            "created_at": new_folder.created_at
-        }
+        return FolderCreateResponse(
+            id=new_folder.id,
+            folder_uuid=new_folder.folder_uuid,
+            name=new_folder.name,
+            folder_type=new_folder.folder_type,
+            mail_count=0,
+            created_at=new_folder.created_at
+        )
         
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ create_folder 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {folder_data.get('name')}, 에러: {str(e)}")
+        logger.error(f"❌ create_folder 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 폴더명: {folder_data.name}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"폴더 생성 중 오류가 발생했습니다: {str(e)}")
 
 
 @router.put("/folders/{folder_uuid}", response_model=None, summary="폴더 수정")
 async def update_folder(
     folder_uuid: str,
-    folder_data: dict,
+    folder_data: FolderUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id)
@@ -191,12 +192,12 @@ async def update_folder(
             raise HTTPException(status_code=400, detail="시스템 폴더는 수정할 수 없습니다")
         
         # 폴더명 중복 확인 (자신 제외, 조직별 필터링 추가)
-        if folder_data.get('name') and folder_data.get('name') != folder.name:
+        if folder_data.name and folder_data.name != folder.name:
             existing_folder = db.query(MailFolder).filter(
                 and_(
                     MailFolder.user_uuid == mail_user.user_uuid,
                     MailFolder.org_id == current_org_id,
-                    MailFolder.name == folder_data.get('name'),
+                    MailFolder.name == folder_data.name,
                     MailFolder.folder_uuid != folder_uuid
                 )
             ).first()
@@ -205,8 +206,12 @@ async def update_folder(
                 raise HTTPException(status_code=400, detail="이미 존재하는 폴더명입니다")
         
         # 폴더 정보 업데이트
-        if folder_data.get('name'):
-            folder.name = folder_data.get('name')
+        if folder_data.name:
+            folder.name = folder_data.name
+        if folder_data.folder_type:
+            folder.folder_type = folder_data.folder_type
+        if folder_data.parent_id is not None:
+            folder.parent_id = folder_data.parent_id
         
         folder.updated_at = datetime.utcnow()
         db.commit()
@@ -288,8 +293,7 @@ async def delete_folder(
             db.query(MailInFolder).filter(
                 and_(
                     MailInFolder.folder_uuid == folder.folder_uuid,
-                    MailInFolder.user_uuid == mail_user.user_uuid,
-                    MailInFolder.org_id == current_org_id
+                    MailInFolder.user_uuid == mail_user.user_uuid
                 )
             ).delete()
         
@@ -375,20 +379,18 @@ async def move_mail_to_folder(
         # 기존 폴더 관계 확인
         existing_relation = db.query(MailInFolder).filter(
             MailInFolder.mail_uuid == mail.mail_uuid,
-            MailInFolder.user_uuid == mail_user.user_uuid,
-            MailInFolder.org_id == current_org_id
+            MailInFolder.user_uuid == mail_user.user_uuid
         ).first()
         
         if existing_relation:
             # 기존 관계 업데이트
             existing_relation.folder_uuid = folder.folder_uuid
-            existing_relation.moved_at = datetime.utcnow()
         else:
             # 새 관계 생성
             new_relation = MailInFolder(
                 mail_uuid=mail.mail_uuid,
                 folder_uuid=folder.folder_uuid,
-                moved_at=datetime.utcnow()
+                user_uuid=mail_user.user_uuid
             )
             db.add(new_relation)
         
@@ -462,7 +464,7 @@ async def backup_mails(
                     Mail.sender_uuid == mail_user.user_uuid,
                     Mail.mail_uuid.in_(
                         db.query(MailRecipient.mail_uuid).filter(
-                            MailRecipient.recipient_uuid == mail_user.user_uuid
+                            MailRecipient.recipient_email == mail_user.email
                         )
                     )
                 )
@@ -532,13 +534,14 @@ async def backup_mails(
                             zip_path = f"attachments/{mail.mail_uuid}/{attachment.filename}"
                             zipf.write(attachment.file_path, zip_path)
             
-            # 메일 데이터를 JSON 파일로 추가
-            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+            # 메일 데이터를 JSON 파일로 추가 (UTF-8 인코딩 명시)
+            temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8')
             try:
                 json.dump(mail_data, temp_file, indent=2, ensure_ascii=False, default=str)
                 temp_file.flush()
                 temp_file.close()  # 파일을 명시적으로 닫음
                 zipf.write(temp_file.name, "mails.json")
+                logger.info(f"📄 JSON 파일 생성 완료 (UTF-8 인코딩): mails.json")
             finally:
                 # 임시 파일 정리
                 if os.path.exists(temp_file.name):
@@ -621,84 +624,180 @@ async def restore_mails(
             raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
         # 임시 파일로 저장
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
-            content = await backup_file.read()
-            temp_file.write(content)
-            temp_file.flush()
+        temp_file_path = None
+        try:
+            # 임시 파일 생성 및 백업 파일 내용 저장
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
+                content = await backup_file.read()
+                temp_file.write(content)
+                temp_file.flush()
+                temp_file_path = temp_file.name
             
-            # ZIP 파일 읽기
-            with zipfile.ZipFile(temp_file.name, 'r') as zipf:
+            # ZIP 파일 읽기 (파일 핸들을 완전히 분리)
+            mail_data = []  # 기본값을 빈 리스트로 설정
+            with zipfile.ZipFile(temp_file_path, 'r') as zipf:
+                logger.info(f"📦 ZIP 파일 내용: {zipf.namelist()}")
+                
                 # mails.json 파일 읽기
                 if 'mails.json' not in zipf.namelist():
+                    logger.error(f"❌ mails.json 파일이 ZIP에 없습니다. 파일 목록: {zipf.namelist()}")
                     raise HTTPException(status_code=400, detail="Invalid backup file format")
                 
-                with zipf.open('mails.json') as json_file:
-                    mail_data = json.load(json_file)
+                # JSON 파일을 바이트로 읽고 다양한 인코딩으로 디코딩 시도
+                json_bytes = zipf.read('mails.json')
+                logger.info(f"📄 JSON 파일 크기: {len(json_bytes)} bytes")
                 
-                restored_count = 0
-                skipped_count = 0
+                # 다양한 인코딩 형식 시도
+                encodings = ['utf-8', 'utf-8-sig', 'cp949', 'euc-kr', 'latin-1']
+                json_content = None
                 
-                for mail_info in mail_data:
+                for encoding in encodings:
                     try:
-                        # 기존 메일 확인 (조직별 격리)
-                        existing_mail = db.query(Mail).filter(
-                            Mail.mail_uuid == mail_info['mail_uuid'],
-                            Mail.org_id == current_org_id
-                        ).first()
-                        
-                        if existing_mail and not overwrite_existing:
-                            skipped_count += 1
-                            continue
-                        
-                        # 메일 복원 또는 생성
-                        if existing_mail:
-                            # 기존 메일 업데이트
-                            existing_mail.subject = mail_info['subject']
-                            existing_mail.body_text = mail_info['content']
-                            existing_mail.status = mail_info['status']
-                            existing_mail.priority = mail_info['priority']
-                            if mail_info['sent_at']:
-                                existing_mail.sent_at = datetime.fromisoformat(mail_info['sent_at'])
-                            if mail_info['read_at']:
-                                existing_mail.read_at = datetime.fromisoformat(mail_info['read_at'])
-                        else:
-                            # 새 메일 생성 (조직 ID 포함)
-                            new_mail = Mail(
-                                id=mail_info['id'],
-                                subject=mail_info['subject'],
-                                content=mail_info['content'],
-                                sender_uuid=mail_user.user_uuid,  # 현재 사용자로 설정
-                                org_id=current_org_id,  # 조직 ID 설정
-                                status=mail_info['status'],
-                                priority=mail_info['priority'],
-                                created_at=datetime.fromisoformat(mail_info['created_at']) if mail_info['created_at'] else datetime.utcnow(),
-                                sent_at=datetime.fromisoformat(mail_info['sent_at']) if mail_info['sent_at'] else None,
-                                read_at=datetime.fromisoformat(mail_info['read_at']) if mail_info['read_at'] else None
-                            )
-                            db.add(new_mail)
-                        
-                        # 수신자 정보 복원
-                        if not existing_mail:
-                            for recipient_info in mail_info['recipients']:
-                                recipient = MailRecipient(
-                                    mail_uuid=mail_info['mail_uuid'],
-                                    recipient_email=recipient_info['email'],  # 올바른 필드명으로 수정
-                                    recipient_type=recipient_info['type']
-                                    # recipient_uuid는 복원 시 별도 처리 필요
-                                    # name 필드는 MailRecipient 모델에 없음
-                                )
-                                db.add(recipient)
-                        
-                        restored_count += 1
-                        
-                    except Exception as mail_error:
-                        logger.error(f"Error restoring mail {mail_info['id']}: {str(mail_error)}")
+                        json_content = json_bytes.decode(encoding)
+                        logger.info(f"📄 JSON 파일 인코딩 감지: {encoding}")
+                        break
+                    except UnicodeDecodeError:
                         continue
                 
-                db.commit()
+                if json_content is None:
+                    logger.error(f"❌ JSON 파일 인코딩을 감지할 수 없습니다")
+                    raise HTTPException(status_code=400, detail="JSON 파일 인코딩을 감지할 수 없습니다")
+                
+                logger.info(f"📄 JSON 내용 길이: {len(json_content)} characters")
+                logger.info(f"📄 JSON 내용 미리보기: {json_content[:200]}...")
+                
+                # JSON 파싱
+                try:
+                    mail_data = json.loads(json_content)
+                    logger.info(f"📊 JSON 파싱 성공 - 데이터 타입: {type(mail_data)}")
+                    if isinstance(mail_data, list):
+                        logger.info(f"📊 메일 데이터 개수: {len(mail_data)}개")
+                        if len(mail_data) > 0:
+                            logger.info(f"📧 첫 번째 메일 샘플: {mail_data[0]}")
+                    else:
+                        logger.warning(f"⚠️ 예상하지 못한 데이터 구조: {type(mail_data)}")
+                        logger.warning(f"⚠️ 데이터 내용: {mail_data}")
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ JSON 파싱 오류: {str(e)}")
+                    logger.error(f"JSON 내용: {json_content[:1000]}")
+                    raise HTTPException(status_code=400, detail=f"JSON 파일 형식이 올바르지 않습니다: {str(e)}")
             
-            # 임시 파일 삭제
-            os.unlink(temp_file.name)
+            # 현재 사용자의 MailUser 정보 가져오기
+            mail_user = db.query(MailUser).filter(
+                MailUser.user_uuid == current_user.user_uuid,
+                MailUser.org_id == current_org_id
+            ).first()
+            
+            # MailUser가 없으면 자동 생성
+            if not mail_user:
+                logger.info(f"📧 MailUser가 없어서 자동 생성 중 - 사용자: {current_user.user_uuid}, 조직: {current_org_id}")
+                
+                mail_user = MailUser(
+                    user_uuid=current_user.user_uuid,
+                    org_id=current_org_id,
+                    email=current_user.email if hasattr(current_user, 'email') else f"user_{current_user.user_uuid}@example.com",
+                    password_hash="temp_hash",  # 임시 해시
+                    display_name=current_user.email.split('@')[0] if hasattr(current_user, 'email') and '@' in current_user.email else f"user_{current_user.user_uuid[:8]}",
+                    is_active=True,
+                    created_at=datetime.utcnow(),
+                    updated_at=datetime.utcnow()
+                )
+                
+                db.add(mail_user)
+                db.flush()  # ID 생성을 위해 flush
+                
+                logger.info(f"✅ MailUser 자동 생성 완료 - UUID: {mail_user.user_uuid}")
+            
+            # ZIP 파일이 완전히 닫힌 후 메일 데이터 처리
+            restored_count = 0
+            skipped_count = 0
+            
+            logger.info(f"📊 복원할 메일 데이터 개수: {len(mail_data) if mail_data else 0}")
+            
+            if not mail_data:
+                logger.warning(f"⚠️ 메일 데이터가 비어있습니다!")
+                return {
+                    "success": True,
+                    "message": "메일 복원이 완료되었습니다. (복원: 0개, 건너뜀: 0개)",
+                    "data": {
+                        "restored_count": 0,
+                        "skipped_count": 0,
+                        "overwrite_existing": overwrite_existing
+                    }
+                }
+            
+            for i, mail_info in enumerate(mail_data):
+                try:
+                    # 백업 파일의 필드명 매핑 (id -> mail_uuid, content -> body_text)
+                    mail_uuid = mail_info.get('id') or mail_info.get('mail_uuid')
+                    mail_content = mail_info.get('content') or mail_info.get('body_text')
+                    
+                    # 기존 메일 확인 (조직별 격리)
+                    existing_mail = db.query(Mail).filter(
+                        Mail.mail_uuid == mail_uuid,
+                        Mail.org_id == current_org_id
+                    ).first()
+                    
+                    if existing_mail and not overwrite_existing:
+                        logger.info(f"⏭️ 기존 메일 건너뜀: {mail_uuid}")
+                        skipped_count += 1
+                        continue
+                    
+                    # 메일 복원 또는 생성
+                    if existing_mail:
+                        # 기존 메일 업데이트
+                        logger.info(f"🔄 기존 메일 업데이트: {mail_uuid}")
+                        existing_mail.subject = mail_info['subject']
+                        existing_mail.body_text = mail_content
+                        existing_mail.status = mail_info.get('status', 'sent')
+                        existing_mail.priority = mail_info.get('priority', 'normal')
+                        if mail_info.get('sent_at'):
+                            existing_mail.sent_at = datetime.fromisoformat(mail_info['sent_at'])
+                    else:
+                        # 새 메일 생성 (조직 ID 포함)
+                        logger.info(f"✨ 새 메일 생성: {mail_uuid}")
+                        new_mail = Mail(
+                            mail_uuid=mail_uuid,
+                            subject=mail_info.get('subject', '제목없음'),
+                            body_text=mail_content,
+                            sender_uuid=mail_user.user_uuid,  # 현재 사용자로 설정
+                            org_id=current_org_id,  # 조직 ID 설정
+                            status=mail_info.get('status', 'sent'),
+                            priority=mail_info.get('priority', 'normal'),
+                            created_at=datetime.fromisoformat(mail_info['created_at']) if mail_info.get('created_at') else datetime.utcnow(),
+                            sent_at=datetime.fromisoformat(mail_info['sent_at']) if mail_info.get('sent_at') else None
+                        )
+                        db.add(new_mail)
+                        db.flush()  # 메일을 먼저 저장하여 관계 설정 가능하게 함
+                    
+                    # 수신자 정보 복원 (새 메일인 경우에만)
+                    if not existing_mail and 'recipients' in mail_info:
+                        logger.info(f"👥 수신자 정보 복원: {len(mail_info['recipients'])}명")
+                        for recipient_info in mail_info['recipients']:
+                            recipient = MailRecipient(
+                                mail_uuid=mail_uuid,
+                                recipient_email=recipient_info['email'],
+                                recipient_type=recipient_info['type']
+                            )
+                            db.add(recipient)
+                    
+                    restored_count += 1
+                    logger.info(f"✅ 메일 복원 완료: {mail_uuid}")
+                    
+                except Exception as mail_error:
+                    logger.error(f"❌ 메일 복원 실패 {mail_info.get('id') or mail_info.get('mail_uuid', 'UUID없음')}: {str(mail_error)}")
+                    continue
+            
+            db.commit()
+            
+        finally:
+            # 임시 파일 정리 (예외 발생 여부와 관계없이 실행)
+            if temp_file_path and os.path.exists(temp_file_path):
+                try:
+                    os.unlink(temp_file_path)
+                    logger.info(f"🗑️ 임시 파일 정리 완료: {temp_file_path}")
+                except Exception as cleanup_error:
+                    logger.warning(f"⚠️ 임시 파일 정리 실패: {temp_file_path}, 오류: {str(cleanup_error)}")
         
         logger.info(f"✅ restore_mails 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 복원: {restored_count}개, 건너뜀: {skipped_count}개")
         
@@ -714,11 +813,21 @@ async def restore_mails(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"❌ restore_mails 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        import traceback
+        error_detail = f"{type(e).__name__}: {str(e)}"
+        error_traceback = traceback.format_exc()
+        logger.error(f"❌ restore_mails 오류 - 조직: {current_org_id}, 사용자: {current_user.email}")
+        logger.error(f"오류 타입: {type(e).__name__}")
+        logger.error(f"오류 메시지: {str(e)}")
+        logger.error(f"오류 상세:\n{error_traceback}")
         return {
             "success": False,
-            "message": f"메일 복원 중 오류가 발생했습니다: {str(e)}",
-            "data": {}
+            "message": f"메일 복원 중 오류가 발생했습니다: {error_detail}",
+            "data": {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "traceback": error_traceback
+            }
         }
 
 

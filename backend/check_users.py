@@ -1,88 +1,71 @@
 #!/usr/bin/env python3
-"""데이터베이스의 사용자 정보를 확인하는 스크립트"""
+"""
+데이터베이스 사용자 목록 확인 스크립트
+"""
 
-import asyncio
-import asyncpg
-from app.config import settings
+import sys
+import os
+from sqlalchemy.orm import Session
 
-async def check_users():
-    """데이터베이스의 사용자 정보를 확인합니다."""
+# 현재 디렉토리를 Python 경로에 추가
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from app.database.user import get_db
+from app.model.user_model import User
+from app.model.mail_model import MailUser
+
+def check_users():
+    """데이터베이스에서 사용자 목록을 확인합니다."""
+    
+    # 데이터베이스 연결
+    db_gen = get_db()
+    db: Session = next(db_gen)
     
     try:
-        conn = await asyncpg.connect(
-            host=settings.DB_HOST,
-            port=settings.DB_PORT,
-            user=settings.DB_USER,
-            password=settings.DB_PASSWORD,
-            database=settings.DB_NAME
-        )
+        print("👥 User 테이블 사용자 목록:")
+        print("=" * 60)
         
-        print("👥 사용자 목록 조회...")
-        
-        # 모든 사용자 조회
-        users = await conn.fetch("""
-            SELECT user_id, user_uuid, email, username, is_active, created_at, org_id
-            FROM users 
-            ORDER BY created_at DESC
-            LIMIT 10;
-        """)
+        users = db.query(User).all()
         
         if users:
-            print(f"\n📊 총 {len(users)}명의 사용자:")
-            print("-" * 120)
-            print(f"{'User ID':15} | {'User UUID':36} | {'Username':15} | {'Email':25} | {'Active':6} | {'Org ID':15}")
-            print("-" * 120)
-            
             for user in users:
-                user_id = user['user_id'] or 'NULL'
-                username = user['username'] or 'NULL'
-                email = user['email'] or 'NULL'
-                org_id = user['org_id'] or 'NULL'
-                active = '✅' if user['is_active'] else '❌'
-                
-                print(f"{user_id:15} | {user['user_uuid']:36} | {username:15} | {email:25} | {active:6} | {org_id:15}")
+                print(f"🔹 사용자 ID: {user.user_id}")
+                print(f"   - 이메일: {user.email}")
+                print(f"   - 사용자명: {user.username}")
+                print(f"   - 조직 ID: {user.org_id}")
+                print(f"   - 활성 상태: {user.is_active}")
+                print(f"   - 역할: {user.role}")
+                print()
         else:
-            print("❌ 사용자가 없습니다.")
+            print("❌ User 테이블에 사용자가 없습니다.")
         
-        # moonsoo 사용자 특별 조회
-        print(f"\n🔍 'moonsoo' 사용자 검색...")
-        moonsoo_users = await conn.fetch("""
-            SELECT user_id, user_uuid, email, username, is_active, org_id, hashed_password
-            FROM users 
-            WHERE user_id = 'moonsoo' OR email LIKE '%moonsoo%' OR username LIKE '%moonsoo%'
-        """)
+        print("\n📧 MailUser 테이블 사용자 목록:")
+        print("=" * 60)
         
-        if moonsoo_users:
-            for user in moonsoo_users:
-                print(f"✅ 발견: user_id={user['user_id']}, username={user['username']}, email={user['email']}")
-                print(f"   활성화: {user['is_active']}, 조직: {user['org_id']}")
-                print(f"   패스워드 해시: {user['hashed_password'][:50]}...")
+        mail_users = db.query(MailUser).all()
+        
+        if mail_users:
+            for mail_user in mail_users:
+                print(f"🔹 메일 사용자 UUID: {mail_user.user_uuid}")
+                print(f"   - 이메일: {mail_user.email}")
+                print(f"   - 표시 이름: {mail_user.display_name}")
+                print(f"   - 조직 ID: {mail_user.org_id}")
+                print(f"   - 활성 상태: {mail_user.is_active}")
+                print()
         else:
-            print("❌ 'moonsoo' 사용자를 찾을 수 없습니다.")
+            print("❌ MailUser 테이블에 사용자가 없습니다.")
             
-        # 조직 정보도 확인
-        print(f"\n🏢 조직 정보 조회...")
-        orgs = await conn.fetch("""
-            SELECT org_id, name, domain, is_active
-            FROM organizations 
-            ORDER BY created_at DESC
-            LIMIT 5;
-        """)
-        
-        if orgs:
-            print(f"📊 총 {len(orgs)}개의 조직:")
-            for org in orgs:
-                active = '✅' if org['is_active'] else '❌'
-                print(f"  org_id={org['org_id']}, 이름={org['name']}, 도메인={org['domain']}, 활성화={active}")
-        else:
-            print("❌ 조직이 없습니다.")
-        
-        await conn.close()
-        
     except Exception as e:
-        print(f'❌ 오류 발생: {e}')
-        import traceback
-        traceback.print_exc()
+        print(f"❌ 사용자 조회 중 오류: {str(e)}")
+    finally:
+        db.close()
+
+def main():
+    """메인 함수"""
+    print("🔍 데이터베이스 사용자 확인")
+    print("=" * 60)
+    
+    check_users()
 
 if __name__ == "__main__":
-    asyncio.run(check_users())
+    main()

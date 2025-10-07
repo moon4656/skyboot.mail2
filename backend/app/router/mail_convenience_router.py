@@ -119,6 +119,31 @@ async def search_mails(
         if search_request.status:
             query = query.filter(Mail.status == search_request.status)
         
+        # 폴더 타입 필터
+        if search_request.folder_type:
+            # 사용자의 해당 폴더 타입 폴더 조회
+            user_folder = db.query(MailFolder).filter(
+                and_(
+                    MailFolder.user_uuid == mail_user.user_uuid,
+                    MailFolder.folder_type == search_request.folder_type
+                )
+            ).first()
+            
+            if user_folder:
+                # 해당 폴더에 있는 메일들만 필터링
+                folder_mail_uuids = db.query(MailInFolder.mail_uuid).filter(
+                    MailInFolder.folder_uuid == user_folder.folder_uuid
+                ).all()
+                mail_uuids = [mail_uuid[0] for mail_uuid in folder_mail_uuids]
+                if mail_uuids:
+                    query = query.filter(Mail.mail_uuid.in_(mail_uuids))
+                else:
+                    # 폴더에 메일이 없으면 빈 결과 반환
+                    query = query.filter(False)
+            else:
+                # 폴더가 없으면 빈 결과 반환
+                query = query.filter(False)
+        
         # 우선순위 필터
         if search_request.priority:
             query = query.filter(Mail.priority == search_request.priority)
@@ -374,17 +399,15 @@ async def get_unread_mails(
                 }
             )
         
-        # 읽지 않은 메일 쿼리 (조직별 필터링 추가)
-        # 현재 MailRecipient 모델에 is_read 필드가 없으므로 모든 받은 메일을 반환
+        # 읽지 않은 메일 쿼리 (조직별 필터링 및 읽지 않은 상태 필터링 추가)
+        # MailRecipient 조인 제거 - 받은편지함 API와 동일한 방식 사용
         query = db.query(Mail).join(
             MailInFolder, Mail.mail_uuid == MailInFolder.mail_uuid
-        ).join(
-            MailRecipient, Mail.mail_uuid == MailRecipient.mail_uuid
         ).filter(
             and_(
                 Mail.org_id == current_org_id,
                 MailInFolder.folder_uuid == inbox_folder.folder_uuid,
-                MailRecipient.recipient_uuid == mail_user.user_uuid
+                MailInFolder.is_read == False  # 읽지 않은 메일만 필터링
             )
         )
         
@@ -404,15 +427,14 @@ async def get_unread_mails(
             
             # 수신자 정보
             recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-            to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
+            to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
             
-            # 현재 사용자의 읽음 상태 확인
-            user_recipient = db.query(MailRecipient).filter(
-                MailRecipient.mail_uuid == mail.mail_uuid,
-                MailRecipient.recipient_uuid == mail_user.user_uuid
+            # 현재 사용자의 읽음 상태 확인 (MailInFolder에서)
+            mail_in_folder = db.query(MailInFolder).filter(
+                MailInFolder.mail_uuid == mail.mail_uuid,
+                MailInFolder.user_uuid == mail_user.user_uuid
             ).first()
-            # TODO: is_read 필드가 MailRecipient 모델에 없음 - 임시로 False 설정
-            is_read = False  # user_recipient.is_read if user_recipient else False
+            is_read = mail_in_folder.is_read if mail_in_folder else False
             
             # 첨부파일 개수
             attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).count()
@@ -515,7 +537,7 @@ async def get_starred_mails(
             
             # 수신자 정보
             recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-            to_emails = [r.recipient.email for r in recipients if r.recipient_type == RecipientType.TO]
+            to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
             
             # 현재 사용자의 읽음 상태 확인
             user_recipient = db.query(MailRecipient).filter(
@@ -615,16 +637,30 @@ async def mark_mail_as_read(
         if not (is_sender or is_recipient):
             raise HTTPException(status_code=403, detail="Access denied")
         
-        # 수신자의 읽음 상태 확인 및 업데이트 (MailRecipient 모델에 is_read 필드가 없으므로 기본 처리)
+        # MailInFolder 테이블에서 읽음 상태 업데이트
+        mail_in_folder = db.query(MailInFolder).filter(
+            and_(
+                MailInFolder.mail_uuid == mail.mail_uuid,
+                MailInFolder.user_uuid == mail_user.user_uuid
+            )
+        ).first()
+        
+        if not mail_in_folder:
+            logger.warning(f"⚠️ MailInFolder 레코드를 찾을 수 없음 - 메일UUID: {mail_uuid}, 사용자UUID: {mail_user.user_uuid}")
+            raise HTTPException(status_code=404, detail="메일 폴더 정보를 찾을 수 없습니다")
+        
+        # 읽음 상태 업데이트
+        read_at = datetime.utcnow()
+        mail_in_folder.is_read = True
+        mail_in_folder.read_at = read_at
+        
+        # 수신자 정보 확인 (응답용)
         recipient = db.query(MailRecipient).filter(
             and_(
                 MailRecipient.mail_uuid == mail.mail_uuid,
                 MailRecipient.recipient_uuid == mail_user.user_uuid
             )
         ).first()
-        
-        # 읽음 처리 로직은 추후 구현 필요 (현재는 기본값 반환)
-        read_at = datetime.utcnow()  # 임시로 현재 시간 설정
         
         # 로그 기록
         log_entry = MailLog(
@@ -646,7 +682,7 @@ async def mark_mail_as_read(
             data={
                 "mail_uuid": mail.mail_uuid,
                 "read_at": read_at,
-                "is_read": recipient.is_read if recipient else False
+                "is_read": mail_in_folder.is_read
             }
         )
         
@@ -702,8 +738,21 @@ async def mark_mail_as_unread(
         if not (is_sender or is_recipient):
             raise HTTPException(status_code=403, detail="Access denied")
         
-        # 읽지 않음 처리
-        mail.read_at = None
+        # MailInFolder 테이블에서 읽지 않음 상태 업데이트
+        mail_in_folder = db.query(MailInFolder).filter(
+            and_(
+                MailInFolder.mail_uuid == mail.mail_uuid,
+                MailInFolder.user_uuid == mail_user.user_uuid
+            )
+        ).first()
+        
+        if not mail_in_folder:
+            logger.warning(f"⚠️ MailInFolder 레코드를 찾을 수 없음 - 메일UUID: {mail_uuid}, 사용자UUID: {mail_user.user_uuid}")
+            raise HTTPException(status_code=404, detail="메일 폴더 정보를 찾을 수 없습니다")
+        
+        # 읽지 않음 상태 업데이트
+        mail_in_folder.is_read = False
+        mail_in_folder.read_at = None
         db.commit()
         
         # 로그 기록
@@ -725,7 +774,8 @@ async def mark_mail_as_unread(
             message="메일이 읽지 않음 처리되었습니다.",
             data={
                 "mail_uuid": mail.mail_uuid,
-                "read_at": mail.read_at
+                "read_at": mail_in_folder.read_at,
+                "is_read": mail_in_folder.is_read
             }
         )
         
@@ -888,7 +938,7 @@ async def star_mail(
             mail_uuid=mail.mail_uuid,
             user_uuid=current_user.user_uuid,
             action="star",
-            timestamp=datetime.utcnow()
+            details=f"메일 중요 표시 - 제목: {mail.subject}"
         )
         db.add(log_entry)
         db.commit()
@@ -963,7 +1013,7 @@ async def unstar_mail(
             mail_uuid=mail.mail_uuid,
             user_uuid=current_user.user_uuid,
             action="unstar",
-            timestamp=datetime.utcnow()
+            details=f"메일 중요 표시 해제 - 제목: {mail.subject}"
         )
         db.add(log_entry)
         db.commit()
@@ -1064,12 +1114,12 @@ async def get_search_suggestions(
                 })
         
         # 수신자 기반 제안 (조직별 필터링 추가)
-        recipient_suggestions = db.query(MailRecipient.email).join(
+        recipient_suggestions = db.query(MailRecipient.recipient_email).join(
             Mail, Mail.mail_uuid == MailRecipient.mail_uuid
         ).filter(
             and_(
                 Mail.org_id == current_org_id,
-                MailRecipient.email.ilike(f"%{query}%"),
+                MailRecipient.recipient_email.ilike(f"%{query}%"),
                 Mail.sender_uuid == mail_user.user_uuid
             )
         ).distinct().limit(limit // 2).all()
