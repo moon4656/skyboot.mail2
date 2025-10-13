@@ -16,6 +16,7 @@ from app.router.mail_setup_router import router as mail_setup_router
 from app.router.organization_router import router as organization_router
 from app.router.user_router import router as user_router
 from app.router.debug_router import router as debug_router
+from app.router.addressbook_router import router as addressbook_router
 
 # 데이터베이스 및 설정
 from app.database.user import engine, Base
@@ -212,7 +213,8 @@ app.include_router(user_router, prefix=f"{api_prefix}/users", tags=["사용자 �
 app.include_router(mail_core_router, prefix=f"{api_prefix}/mail", tags=["메일 핵심"]) 
 app.include_router(mail_convenience_router, prefix=f"{api_prefix}/mail", tags=["메일 편의"]) 
 app.include_router(mail_advanced_router, prefix=f"{api_prefix}/mail", tags=["메일 고급"]) 
-app.include_router(mail_setup_router, prefix=f"{api_prefix}/mail", tags=["메일 설정"]) 
+app.include_router(mail_setup_router, prefix=f"{api_prefix}/mail", tags=["메일 설정"])
+app.include_router(addressbook_router, prefix=f"{api_prefix}/addressbook", tags=["주소록"])
 
 # 개발 환경에서만 디버그 라우터 추가
 if settings.is_development():
