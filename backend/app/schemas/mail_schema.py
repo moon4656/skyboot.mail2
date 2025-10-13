@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from typing import List, Optional, Union
 from datetime import datetime
 from enum import Enum
@@ -48,8 +48,7 @@ class MailUserResponse(MailUserBase):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # 첨부파일 스키마
 class AttachmentBase(BaseModel):
@@ -66,8 +65,7 @@ class AttachmentResponse(AttachmentBase):
     original_filename: str
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # 수신자 스키마
 class RecipientBase(BaseModel):
@@ -83,8 +81,7 @@ class RecipientResponse(BaseModel):
     read_at: Optional[datetime]
     recipient: MailUserResponse
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # 메일 스키마
 class MailBase(BaseModel):
@@ -96,7 +93,7 @@ class MailBase(BaseModel):
 
 class MailCreate(MailBase):
     """메일 생성 스키마"""
-    recipients: List[RecipientBase] = Field(..., min_items=1, description="수신자 목록")
+    recipients: List[RecipientBase] = Field(..., min_length=1, description="수신자 목록")
     is_draft: bool = Field(False, description="임시보관함 여부")
     send_immediately: bool = Field(True, description="즉시 발송 여부")
 
@@ -121,8 +118,7 @@ class MailResponse(MailBase):
     recipients: List[RecipientResponse]
     attachments: List[AttachmentResponse]
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class MailDetailResponse(BaseModel):
     """메일 상세 응답 스키마 - API 응답 형태"""
@@ -144,8 +140,7 @@ class MailListResponse(BaseModel):
     attachment_count: int
     is_read: Optional[bool] = None  # 받은 메일의 경우에만 사용
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # 폴더 스키마
 class FolderBase(BaseModel):
@@ -157,14 +152,15 @@ class FolderBase(BaseModel):
 class FolderCreate(FolderBase):
     """폴더 생성 스키마"""
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "중요한 메일",
                 "folder_type": "custom",
                 "parent_id": 1
             }
         }
+    )
 
 class FolderUpdate(BaseModel):
     """폴더 수정 스키마"""
@@ -172,14 +168,15 @@ class FolderUpdate(BaseModel):
     folder_type: Optional[FolderType] = Field(None, description="폴더 타입")
     parent_id: Optional[int] = Field(None, description="상위 폴더 ID")
     
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "name": "업무 메일",
                 "folder_type": "custom",
                 "parent_id": 1
             }
         }
+    )
 
 class FolderResponse(FolderBase):
     """폴더 응답 스키마"""
@@ -188,10 +185,9 @@ class FolderResponse(FolderBase):
     is_system: bool
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
-# 페이지네이션 스키마
+# 페이지네이션 및 검색 스키마
 class PaginationParams(BaseModel):
     """페이지네이션 매개변수"""
     page: int = Field(1, ge=1, description="페이지 번호")

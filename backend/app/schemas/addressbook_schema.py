@@ -1,13 +1,12 @@
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, ConfigDict
 
 
 class DepartmentOut(BaseModel):
     id: int
     name: str
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupCreate(BaseModel):
@@ -25,8 +24,7 @@ class GroupOut(BaseModel):
     name: str
     description: Optional[str] = None
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ContactCreate(BaseModel):
@@ -70,8 +68,7 @@ class ContactOut(BaseModel):
     profile_image_url: Optional[str] = None
     groups: List[GroupOut] = []
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PaginatedContacts(BaseModel):

@@ -15,6 +15,7 @@ import json
 from ..database.user import get_db
 from ..model.user_model import User
 from ..model.mail_model import FolderType, Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog, generate_mail_uuid
+from ..model import Organization
 from ..schemas.mail_schema import (
     APIResponse,
     MailSendRequest,
@@ -30,6 +31,7 @@ from ..schemas.mail_schema import (
     MailPriority,
 )
 from ..service.mail_service import MailService
+from ..service.organization_service import OrganizationService
 from ..service.auth_service import get_current_user
 from ..middleware.tenant_middleware import get_current_org_id, get_current_organization
 
@@ -46,6 +48,38 @@ security = HTTPBearer()
 # 첨부파일 저장 디렉토리
 ATTACHMENT_DIR = "attachments"
 os.makedirs(ATTACHMENT_DIR, exist_ok=True)
+
+
+def _mb_to_bytes(mb: int) -> int:
+    """Convert MB to bytes."""
+    try:
+        return int(mb) * 1024 * 1024
+    except Exception:
+        return 25 * 1024 * 1024  # safe default
+
+
+async def _get_org_size_limits(db: Session, org_id: str) -> Dict[str, int]:
+    """Fetch organization size limits and return in bytes with sensible defaults."""
+    service = OrganizationService(db)
+    settings_resp = await service.get_organization_settings(org_id)
+    # Defaults aligned with OrganizationSettings schema
+    max_attachment_mb = 25
+    max_mail_mb = 25
+    try:
+        if settings_resp and settings_resp.settings:
+            if getattr(settings_resp.settings, "max_attachment_size_mb", None) is not None:
+                max_attachment_mb = int(settings_resp.settings.max_attachment_size_mb)
+            if getattr(settings_resp.settings, "max_mail_size_mb", None) is not None:
+                max_mail_mb = int(settings_resp.settings.max_mail_size_mb)
+    except Exception:
+        # keep defaults on any conversion issue
+        pass
+    return {
+        "max_attachment_bytes": _mb_to_bytes(max_attachment_mb),
+        "max_mail_bytes": _mb_to_bytes(max_mail_mb),
+        "max_attachment_mb": max_attachment_mb,
+        "max_mail_mb": max_mail_mb,
+    }
 
 # 안전한 첨부파일 처리를 위한 커스텀 dependency
 async def safe_attachments_handler(
@@ -264,6 +298,14 @@ async def send_mail(
                     recipients.append(recipient)
                     db.add(recipient)
         
+        # 조직 크기 제한 조회
+        size_limits = await _get_org_size_limits(db, current_org_id)
+
+        # 본문/헤더 크기 계산 (UTF-8 기준)
+        subject_bytes = len(subject.encode("utf-8")) if subject else 0
+        body_bytes = len(content.encode("utf-8")) if content else 0
+        total_mail_bytes = subject_bytes + body_bytes
+
         # 첨부파일 처리
         attachment_list = []
         try:
@@ -281,8 +323,18 @@ async def send_mail(
                         
                         # 파일 내용 저장
                         with open(file_path, "wb") as buffer:
-                            content = await attachment.read()
-                            buffer.write(content)
+                            file_content = await attachment.read()
+                            # 개별 첨부 크기 제한 확인
+                            file_size_bytes = len(file_content)
+                            if file_size_bytes > size_limits["max_attachment_bytes"]:
+                                raise HTTPException(
+                                    status_code=413,
+                                    detail=(
+                                        f"첨부파일 크기 초과: {attachment.filename} ({file_size_bytes} bytes). "
+                                        f"허용 최대: {size_limits['max_attachment_mb']} MB"
+                                    ),
+                                )
+                            buffer.write(file_content)
                         
                         # 첨부파일 정보 저장
                         mail_attachment = MailAttachment(
@@ -296,6 +348,8 @@ async def send_mail(
                         attachment_list.append(mail_attachment)
                         db.add(mail_attachment)
                         logger.info(f"✅ 첨부파일 저장 완료 - 파일명: {attachment.filename}, 크기: {mail_attachment.file_size}바이트")
+                        # 총 메일 크기에 첨부 크기 반영
+                        total_mail_bytes += mail_attachment.file_size
                     else:
                         logger.warning(f"⚠️ 유효하지 않은 첨부파일 건너뜀 - 인덱스: {i}, 파일명: {getattr(attachment, 'filename', 'None')}")
             else:
@@ -306,6 +360,16 @@ async def send_mail(
             logger.error(f"Traceback: {traceback.format_exc()}")
             # 첨부파일 오류가 있어도 메일 발송은 계속 진행
             attachment_list = []
+        
+        # 총 메일 크기 제한 확인
+        if total_mail_bytes > size_limits["max_mail_bytes"]:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"메일 전체 크기 초과: {total_mail_bytes} bytes. "
+                    f"허용 최대: {size_limits['max_mail_mb']} MB"
+                ),
+            )
         
         # 메일 로그 생성
         mail_log = MailLog(
@@ -341,6 +405,16 @@ async def send_mail(
                             "file_size": attachment.file_size,
                             "content_type": attachment.content_type
                         })
+                
+                # 일일 메일 발송 제한 검증 (수신자 전체 수 기준)
+                organization = db.query(Organization).filter(Organization.org_id == current_org_id).first()
+                if not organization:
+                    raise HTTPException(status_code=404, detail="조직을 찾을 수 없습니다")
+                await mail_service._check_daily_email_limit(
+                    org_id=current_org_id,
+                    max_emails_per_day=getattr(organization, "max_emails_per_day", 0),
+                    email_count=len(recipients)
+                )
                 
                 smtp_result = await mail_service.send_email_smtp(
                     sender_email=mail_user.email,
@@ -510,6 +584,21 @@ async def send_mail_json(
     try:
         logger.info(f"📤 메일 발송 시작 (JSON) - 조직: {current_org_id}, 사용자: {current_user.email}, 수신자: {mail_data.to}")
         
+        # 조직 크기 제한 조회 및 본문 크기 검증 (첨부는 JSON 모델에 없음)
+        size_limits = await _get_org_size_limits(db, current_org_id)
+        subject_bytes = len(mail_data.subject.encode("utf-8")) if mail_data.subject else 0
+        body_text_bytes = len(mail_data.body_text.encode("utf-8")) if mail_data.body_text else 0
+        body_html_bytes = len(mail_data.body_html.encode("utf-8")) if mail_data.body_html else 0
+        total_mail_bytes = subject_bytes + body_text_bytes + body_html_bytes
+        if total_mail_bytes > size_limits["max_mail_bytes"]:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"메일 전체 크기 초과 (JSON): {total_mail_bytes} bytes. "
+                    f"허용 최대: {size_limits['max_mail_mb']} MB"
+                ),
+            )
+        
         # 조직 내에서 메일 사용자 조회
         mail_user = db.query(MailUser).filter(
             MailUser.user_uuid == current_user.user_uuid,
@@ -654,6 +743,16 @@ async def send_mail_json(
         # 실제 메일 발송 (SMTP)
         try:
             mail_service = MailService(db)
+            
+            # 일일 메일 발송 제한 검증 (수신자 전체 수 기준)
+            organization = db.query(Organization).filter(Organization.org_id == current_org_id).first()
+            if not organization:
+                raise HTTPException(status_code=404, detail="조직을 찾을 수 없습니다")
+            await mail_service._check_daily_email_limit(
+                org_id=current_org_id,
+                max_emails_per_day=getattr(organization, "max_emails_per_day", 0),
+                email_count=len(recipients)
+            )
             smtp_result = await mail_service.send_email_smtp(
                 sender_email=mail_user.email,
                 recipient_emails=[r.recipient_email for r in recipients],
@@ -1717,3 +1816,37 @@ async def delete_mail(
     except Exception as e:
         logger.error(f"❌ delete_mail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"메일 삭제 중 오류가 발생했습니다: {str(e)}")
+
+
+@router.post("/trash/{mail_uuid}/restore", response_model=Dict[str, Any], summary="휴지통에서 메일 복원")
+async def restore_mail(
+    mail_uuid: str,
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    휴지통에 있는 메일을 복원합니다.
+    
+    - 발신자: 휴지통 상태에서 원 상태(SENT/DRAFT)로 복원
+    - 수신자: 삭제 표시(is_deleted)를 해제하여 복원
+    """
+    try:
+        logger.info(f"♻️ restore_mail 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
+        service = MailService(db)
+        success = await service.restore_mail(
+            org_id=current_org_id,
+            user_uuid=current_user.user_uuid,
+            mail_uuid=mail_uuid
+        )
+        if success:
+            logger.info(f"✅ restore_mail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
+            return {"success": True, "message": "메일이 복원되었습니다.", "data": {"mail_uuid": mail_uuid}}
+        else:
+            logger.warning(f"⚠️ restore_mail 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
+            return {"success": False, "message": "메일 복원에 실패했습니다.", "data": {}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ restore_mail 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}, 에러: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"메일 복원 중 오류가 발생했습니다: {str(e)}")

@@ -5,7 +5,7 @@ SaaS 다중 조직 지원을 위한 데이터 검증 및 직렬화 스키마
 """
 from typing import Optional, Dict, Any, List
 from datetime import datetime
-from pydantic import BaseModel, Field, validator, EmailStr
+from pydantic import BaseModel, Field, field_validator, EmailStr, ConfigDict
 import uuid
 
 
@@ -16,9 +16,11 @@ class OrganizationBase(BaseModel):
     description: Optional[str] = Field(None, max_length=500, description="조직 설명")
     max_users: Optional[int] = Field(None, ge=1, le=10000, description="최대 사용자 수")
     max_storage_gb: Optional[int] = Field(None, ge=1, le=10000, description="최대 저장 공간 (GB)")
+    max_emails_per_day: Optional[int] = Field(None, ge=0, le=100000, description="일일 최대 메일 발송 수 (0=무제한)")
     settings: Optional[Dict[str, Any]] = Field(default_factory=dict, description="조직 설정")
 
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         """조직명 검증"""
         if not v or not v.strip():
@@ -31,7 +33,8 @@ class OrganizationBase(BaseModel):
         
         return v.strip()
 
-    @validator('domain')
+    @field_validator('domain')
+    @classmethod
     def validate_domain(cls, v):
         """도메인 검증"""
         if v:
@@ -49,7 +52,8 @@ class OrganizationBase(BaseModel):
         
         return v
 
-    @validator('settings')
+    @field_validator('settings')
+    @classmethod
     def validate_settings(cls, v):
         """설정 검증"""
         if v is None:
@@ -59,6 +63,7 @@ class OrganizationBase(BaseModel):
         allowed_keys = {
             'mail_retention_days',
             'max_attachment_size_mb',
+            'max_mail_size_mb',
             'enable_spam_filter',
             'enable_virus_scan',
             'enable_encryption',
@@ -83,7 +88,8 @@ class OrganizationCreate(OrganizationBase):
     org_code: str = Field(..., min_length=2, max_length=50, description="조직 코드 (subdomain용)")
     subdomain: str = Field(..., min_length=2, max_length=50, description="서브도메인")
     
-    @validator('org_code')
+    @field_validator('org_code')
+    @classmethod
     def validate_org_code(cls, v):
         """조직 코드 검증"""
         if not v or len(v.strip()) == 0:
@@ -94,7 +100,8 @@ class OrganizationCreate(OrganizationBase):
             raise ValueError('조직 코드는 영문자, 숫자, 하이픈만 사용할 수 있습니다.')
         return v
     
-    @validator('subdomain')
+    @field_validator('subdomain')
+    @classmethod
     def validate_subdomain(cls, v):
         """서브도메인 검증"""
         if not v or len(v.strip()) == 0:
@@ -118,7 +125,8 @@ class OrganizationUpdate(BaseModel):
     settings: Optional[Dict[str, Any]] = Field(None, description="조직 설정")
     is_active: Optional[bool] = Field(None, description="활성 상태")
 
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         """조직명 검증"""
         if v is not None:
@@ -133,7 +141,8 @@ class OrganizationUpdate(BaseModel):
             return v.strip()
         return v
 
-    @validator('domain')
+    @field_validator('domain')
+    @classmethod
     def validate_domain(cls, v):
         """도메인 검증"""
         if v is not None:
@@ -162,14 +171,15 @@ class OrganizationResponse(OrganizationBase):
     created_at: datetime = Field(..., description="생성 시간")
     updated_at: datetime = Field(..., description="수정 시간")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrganizationSettings(BaseModel):
     """조직 설정 스키마"""
     mail_retention_days: Optional[int] = Field(365, ge=1, le=3650, description="메일 보관 기간 (일)")
     max_attachment_size_mb: Optional[int] = Field(25, ge=1, le=100, description="최대 첨부파일 크기 (MB)")
+    max_mail_size_mb: Optional[int] = Field(25, ge=1, le=100, description="최대 메일 전체 크기 (MB)")
+    max_emails_per_day: Optional[int] = Field(1000, ge=0, le=100000, description="일일 최대 메일 발송 수 (0=무제한)")
     enable_spam_filter: Optional[bool] = Field(True, description="스팸 필터 활성화")
     enable_virus_scan: Optional[bool] = Field(True, description="바이러스 검사 활성화")
     enable_encryption: Optional[bool] = Field(False, description="메일 암호화 활성화")
@@ -239,7 +249,8 @@ class OrganizationCreateRequest(BaseModel):
     admin_password: str = Field(..., min_length=4, max_length=100, description="관리자 비밀번호")
     admin_name: Optional[str] = Field(None, max_length=100, description="관리자 이름")
 
-    @validator('admin_password')
+    @field_validator('admin_password')
+    @classmethod
     def validate_admin_password(cls, v):
         """관리자 비밀번호 검증"""
         if len(v) < 4:
@@ -273,7 +284,8 @@ class OrganizationInvite(BaseModel):
     role: str = Field("user", description="사용자 역할")
     message: Optional[str] = Field(None, max_length=500, description="초대 메시지")
 
-    @validator('role')
+    @field_validator('role')
+    @classmethod
     def validate_role(cls, v):
         """역할 검증"""
         allowed_roles = ['user', 'admin', 'moderator']
@@ -293,8 +305,7 @@ class OrganizationMember(BaseModel):
     joined_at: datetime = Field(..., description="가입 시간")
     last_login: Optional[datetime] = Field(None, description="마지막 로그인")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrganizationMemberUpdate(BaseModel):
@@ -302,7 +313,8 @@ class OrganizationMemberUpdate(BaseModel):
     role: Optional[str] = Field(None, description="역할")
     is_active: Optional[bool] = Field(None, description="활성 상태")
 
-    @validator('role')
+    @field_validator('role')
+    @classmethod
     def validate_role(cls, v):
         """역할 검증"""
         if v is not None:
@@ -322,8 +334,7 @@ class OrganizationUsage(BaseModel):
     active_users: int = Field(0, description="활성 사용자 수")
     api_requests: int = Field(0, description="API 요청 수")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrganizationBilling(BaseModel):
@@ -341,8 +352,7 @@ class OrganizationBilling(BaseModel):
     additional_user_cost: float = Field(0, description="추가 사용자 비용")
     additional_storage_cost: float = Field(0, description="추가 저장 공간 비용")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrganizationListResponse(BaseModel):
@@ -370,6 +380,8 @@ class OrganizationSettingsUpdate(BaseModel):
     """조직 설정 수정 스키마"""
     mail_retention_days: Optional[int] = Field(None, ge=1, le=3650, description="메일 보관 기간 (일)")
     max_attachment_size_mb: Optional[int] = Field(None, ge=1, le=100, description="최대 첨부파일 크기 (MB)")
+    max_mail_size_mb: Optional[int] = Field(None, ge=1, le=100, description="최대 메일 전체 크기 (MB)")
+    max_emails_per_day: Optional[int] = Field(None, ge=0, le=100000, description="일일 최대 메일 발송 수 (0=무제한)")
     enable_spam_filter: Optional[bool] = Field(None, description="스팸 필터 활성화")
     enable_virus_scan: Optional[bool] = Field(None, description="바이러스 검사 활성화")
     enable_encryption: Optional[bool] = Field(None, description="메일 암호화 활성화")

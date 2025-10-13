@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional, Dict, Any, List
 import os
 from enum import Enum
@@ -122,10 +122,11 @@ class SaaSSettings(BaseSettings):
     # 개발 환경 설정
     RELOAD_ON_CHANGE: bool = True if ENVIRONMENT == Environment.DEVELOPMENT else False
     
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=True,
+        extra="ignore"
+    )
         
     def get_database_url(self, org_id: Optional[str] = None) -> str:
         """조직별 데이터베이스 URL 반환 (필요시 샤딩 지원)"""

@@ -946,6 +946,101 @@ class MailService:
             self.db.rollback()
             logger.error(f"❌ 메일 삭제 실패: {str(e)}")
             raise
+
+    async def restore_mail(
+        self,
+        org_id: str,
+        user_uuid: str,
+        mail_uuid: str
+    ) -> bool:
+        """
+        휴지통에서 메일을 복원합니다.
+        
+        - 발신자: Mail.status가 TRASH인 경우 원 상태(SENT/DRAFT)로 복원
+        - 수신자: MailRecipient.is_deleted가 True인 경우 False로 복원
+        """
+        try:
+            logger.info(f"♻️ 메일 복원 시작 - 조직 ID: {org_id}, 사용자 ID: {user_uuid}, 메일 UUID: {mail_uuid}")
+            
+            # 사용자 검증
+            user = self.db.query(User).filter(
+                User.user_uuid == user_uuid,
+                User.org_id == org_id,
+                User.is_active == True
+            ).first()
+            if not user:
+                raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+            
+            # 메일 사용자 조회
+            mail_user = self.db.query(MailUser).filter(
+                MailUser.user_uuid == user_uuid,
+                MailUser.org_id == org_id
+            ).first()
+            if not mail_user:
+                raise HTTPException(status_code=404, detail="메일 사용자를 찾을 수 없습니다.")
+            
+            # 메일 조회
+            mail = self.db.query(Mail).filter(
+                Mail.org_id == org_id,
+                Mail.mail_uuid == mail_uuid
+            ).first()
+            if not mail:
+                raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다.")
+            
+            is_sender = mail.sender_uuid == mail_user.user_uuid
+            recipient_record = self.db.query(MailRecipient).filter(
+                MailRecipient.mail_uuid == mail_uuid,
+                MailRecipient.recipient_uuid == mail_user.user_uuid
+            ).first()
+            is_recipient = recipient_record is not None
+            
+            if not (is_sender or is_recipient):
+                raise HTTPException(status_code=403, detail="이 메일을 복원할 권한이 없습니다.")
+            
+            if is_sender:
+                if mail.status != MailStatus.TRASH.value:
+                    raise HTTPException(status_code=400, detail="휴지통에 있는 메일만 복원할 수 있습니다.")
+                
+                # 원래 상태 추론: 발송 시각 존재 여부로 SENT/DRAFT 결정
+                mail.status = MailStatus.SENT.value if mail.sent_at else MailStatus.DRAFT.value
+                mail.deleted_at = None
+                
+                # 로그 기록
+                mail_log = MailLog(
+                    action="restore_mail",
+                    details=f"발신자 복원 - 원래 상태: {mail.status}",
+                    mail_uuid=mail.mail_uuid,
+                    user_uuid=mail_user.user_uuid,
+                    ip_address=None,
+                    user_agent=None
+                )
+                self.db.add(mail_log)
+            else:
+                # 수신자 복원
+                if not recipient_record.is_deleted:
+                    raise HTTPException(status_code=400, detail="삭제된 메일만 복원할 수 있습니다.")
+                recipient_record.is_deleted = False
+                recipient_record.deleted_at = None
+                
+                mail_log = MailLog(
+                    action="restore_mail",
+                    details="수신자 복원",
+                    mail_uuid=mail.mail_uuid,
+                    user_uuid=mail_user.user_uuid,
+                    ip_address=None,
+                    user_agent=None
+                )
+                self.db.add(mail_log)
+            
+            self.db.commit()
+            logger.info(f"✅ 메일 복원 완료 - 메일 UUID: {mail_uuid}")
+            return True
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"❌ 메일 복원 실패: {str(e)}")
+            raise
     
     async def get_mail_stats(
         self,

@@ -199,6 +199,7 @@ class OrganizationService:
                 is_active=new_org.is_active,
                 max_users=new_org.max_users,
                 max_storage_gb=new_org.max_storage_gb,
+                max_emails_per_day=new_org.max_emails_per_day,
                 settings=settings_dict,
                 created_at=new_org.created_at,
                 updated_at=new_org.updated_at
@@ -273,6 +274,7 @@ class OrganizationService:
                 is_active=org.is_active,
                 max_users=org.max_users,
                 max_storage_gb=org.max_storage_gb,
+                max_emails_per_day=org.max_emails_per_day,
                 settings=settings_dict,
                 created_at=org.created_at,
                 updated_at=org.updated_at
@@ -347,6 +349,7 @@ class OrganizationService:
                 is_active=org.is_active,
                 max_users=org.max_users,
                 max_storage_gb=org.max_storage_gb,
+                max_emails_per_day=org.max_emails_per_day,
                 settings=settings_dict,
                 created_at=org.created_at,
                 updated_at=org.updated_at
@@ -398,17 +401,28 @@ class OrganizationService:
             for org in orgs:
                 # 설정을 딕셔너리로 변환
                 settings_dict = {}
+                # settings에서 제외해야 할 핵심 조직 필드들 (스키마 검증 충돌 방지)
+                core_org_fields = {
+                    'max_users', 'max_storage_gb', 'timezone', 'name', 'domain', 
+                    'description', 'is_active', 'org_id', 'org_code', 'subdomain',
+                    'admin_email', 'created_at', 'updated_at'
+                }
+
                 if hasattr(org, 'settings') and org.settings:
                     # org.settings가 리스트인 경우 (OrganizationSettings 객체들)
                     if isinstance(org.settings, list):
                         for setting in org.settings:
-                            settings_dict[setting.setting_key] = setting.setting_value
+                            if setting.setting_key not in core_org_fields:
+                                settings_dict[setting.setting_key] = setting.setting_value
                     # org.settings가 단일 객체인 경우
                     elif hasattr(org.settings, 'setting_key'):
-                        settings_dict[org.settings.setting_key] = org.settings.setting_value
+                        if org.settings.setting_key not in core_org_fields:
+                            settings_dict[org.settings.setting_key] = org.settings.setting_value
                     # org.settings가 이미 딕셔너리인 경우
                     elif isinstance(org.settings, dict):
-                        settings_dict = org.settings
+                        for key, value in org.settings.items():
+                            if key not in core_org_fields:
+                                settings_dict[key] = value
                 
                 result.append(OrganizationResponse(
                     org_id=org.org_id,
@@ -421,6 +435,7 @@ class OrganizationService:
                     is_active=org.is_active,
                     max_users=org.max_users,
                     max_storage_gb=org.max_storage_gb,
+                    max_emails_per_day=org.max_emails_per_day,
                     settings=settings_dict,
                     created_at=org.created_at,
                     updated_at=org.updated_at
@@ -523,6 +538,7 @@ class OrganizationService:
                 is_active=org.is_active,
                 max_users=org.max_users,
                 max_storage_gb=org.max_storage_gb,
+                max_emails_per_day=org.max_emails_per_day,
                 settings=settings_dict,
                 created_at=org.created_at,
                 updated_at=org.updated_at
@@ -777,6 +793,13 @@ class OrganizationService:
                 except (ValueError, TypeError, json.JSONDecodeError) as e:
                     logger.warning(f"⚠️ 설정 값 변환 오류 - {setting_key}: {setting_value}, 오류: {str(e)}")
                     settings_dict[setting_key] = setting_value  # 원본 값 사용
+
+            # 핵심 조직 필드 반영: 일일 최대 메일 발송 수
+            try:
+                if hasattr(org_response, 'max_emails_per_day') and org_response.max_emails_per_day is not None:
+                    settings_dict['max_emails_per_day'] = org_response.max_emails_per_day
+            except Exception as e:
+                logger.warning(f"⚠️ max_emails_per_day 설정 반영 오류: {str(e)}")
             
             # 기본 설정과 데이터베이스 설정을 병합하여 OrganizationSettingsSchema 생성
             try:
@@ -839,6 +862,15 @@ class OrganizationService:
             
             # 각 설정을 OrganizationSettings 테이블에 저장/업데이트
             for setting_key, setting_value in update_data.items():
+                # 특수 키 처리: 조직 컬럼에 저장되는 값
+                if setting_key == "max_emails_per_day":
+                    try:
+                        org.max_emails_per_day = int(setting_value)
+                        logger.info(f"🔧 조직 필드 업데이트: max_emails_per_day = {org.max_emails_per_day}")
+                    except Exception as conv_err:
+                        logger.warning(f"⚠️ max_emails_per_day 변환 오류: {str(conv_err)}")
+                    # settings 테이블에는 저장하지 않음
+                    continue
                 # 기존 설정 찾기
                 existing_setting = self.db.query(OrganizationSettings).filter(
                     OrganizationSettings.org_id == org_id,

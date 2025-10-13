@@ -8,6 +8,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
+import time
 import json
 import io
 from fastapi.testclient import TestClient
@@ -410,6 +411,235 @@ class TestMailCoreRouter:
         else:
             print("❌ test_12_performance_test 실패")
 
+    def test_13_mail_size_limits_send_endpoint(self):
+        """메일 크기 제한 테스트 (/send 엔드포인트)"""
+        print("\n🧪 test_13_mail_size_limits_send_endpoint")
+        
+        if not self.admin_token:
+            print("⏭️ 관리자 토큰이 없어 크기 제한 테스트를 건너뜁니다.")
+            return
+        
+        # 1. 정상 크기 메일 테스트
+        print("📝 정상 크기 메일 테스트...")
+        normal_mail_data = {
+            "to_emails": "test@skyboot.com",
+            "subject": "정상 크기 테스트",
+            "content": "정상 크기의 메일 내용입니다.",
+            "priority": "NORMAL"
+        }
+        
+        response = self.client.post(
+            "/api/v1/mail/send",
+            headers=self.admin_headers,
+            data=normal_mail_data
+        )
+        
+        if response.status_code == 200:
+            print("✅ 정상 크기 메일 발송 성공")
+        else:
+            print(f"❌ 정상 크기 메일 발송 실패: {response.status_code}")
+        
+        # 2. 큰 본문 크기 테스트 (25MB 초과)
+        print("📝 큰 본문 크기 테스트...")
+        large_content = "A" * (26 * 1024 * 1024)  # 26MB 텍스트
+        large_mail_data = {
+            "to_emails": "test@skyboot.com",
+            "subject": "큰 본문 크기 테스트",
+            "content": large_content,
+            "priority": "NORMAL"
+        }
+        
+        response = self.client.post(
+            "/api/v1/mail/send",
+            headers=self.admin_headers,
+            data=large_mail_data
+        )
+        
+        if response.status_code == 413:
+            print("✅ 큰 본문 크기 제한 검증 성공 (413 에러)")
+        else:
+            print(f"❌ 큰 본문 크기 제한 검증 실패: {response.status_code}")
+            if response.status_code != 413:
+                print(f"응답 내용: {response.text}")
+        
+        # 3. 큰 첨부파일 테스트 (25MB 초과)
+        print("📝 큰 첨부파일 크기 테스트...")
+        large_file_content = b"B" * (26 * 1024 * 1024)  # 26MB 바이너리
+        
+        files = {
+            "attachments": ("large_file.txt", io.BytesIO(large_file_content), "text/plain")
+        }
+        
+        attachment_mail_data = {
+            "to_emails": "test@skyboot.com",
+            "subject": "큰 첨부파일 테스트",
+            "content": "큰 첨부파일이 포함된 메일입니다.",
+            "priority": "NORMAL"
+        }
+        
+        response = self.client.post(
+            "/api/v1/mail/send",
+            headers={k: v for k, v in self.admin_headers.items() if k != "Content-Type"},  # multipart/form-data를 위해 Content-Type 제거
+            data=attachment_mail_data,
+            files=files
+        )
+        
+        if response.status_code == 413:
+            print("✅ 큰 첨부파일 크기 제한 검증 성공 (413 에러)")
+        else:
+            print(f"❌ 큰 첨부파일 크기 제한 검증 실패: {response.status_code}")
+            if response.status_code != 413:
+                print(f"응답 내용: {response.text}")
+
+    def test_14_mail_size_limits_send_json_endpoint(self):
+        """메일 크기 제한 테스트 (/send-json 엔드포인트)"""
+        print("\n🧪 test_14_mail_size_limits_send_json_endpoint")
+        
+        if not self.admin_token:
+            print("⏭️ 관리자 토큰이 없어 크기 제한 테스트를 건너뜁니다.")
+            return
+        
+        # 1. 정상 크기 메일 테스트
+        print("📝 정상 크기 JSON 메일 테스트...")
+        normal_mail_data = {
+            "to": ["test@skyboot.com"],
+            "subject": "정상 크기 JSON 테스트",
+            "body_text": "정상 크기의 JSON 메일 내용입니다.",
+            "body_html": "<p>정상 크기의 HTML 메일 내용입니다.</p>",
+            "priority": "NORMAL"
+        }
+        
+        response = self.client.post(
+            "/api/v1/mail/send-json",
+            headers=self.admin_headers,
+            json=normal_mail_data
+        )
+        
+        if response.status_code == 200:
+            print("✅ 정상 크기 JSON 메일 발송 성공")
+        else:
+            print(f"❌ 정상 크기 JSON 메일 발송 실패: {response.status_code}")
+            print(f"응답 내용: {response.text}")
+        
+        # 2. 큰 본문 크기 테스트 (25MB 초과)
+        print("📝 큰 본문 크기 JSON 테스트...")
+        large_content = "A" * (26 * 1024 * 1024)  # 26MB 텍스트
+        large_mail_data = {
+            "to": ["test@skyboot.com"],
+            "subject": "큰 본문 크기 JSON 테스트",
+            "body_text": large_content,
+            "body_html": f"<p>{large_content}</p>",
+            "priority": "NORMAL"
+        }
+        
+        response = self.client.post(
+            "/api/v1/mail/send-json",
+            headers=self.admin_headers,
+            json=large_mail_data
+        )
+        
+        if response.status_code == 413:
+            print("✅ 큰 본문 크기 제한 검증 성공 (413 에러)")
+        else:
+            print(f"❌ 큰 본문 크기 제한 검증 실패: {response.status_code}")
+            if response.status_code != 413:
+                print(f"응답 내용: {response.text}")
+
+    def test_15_organization_settings_size_limits(self):
+        """조직 설정 기반 크기 제한 테스트"""
+        print("\n🧪 test_15_organization_settings_size_limits")
+        
+        if not self.admin_token:
+            print("⏭️ 관리자 토큰이 없어 조직 설정 테스트를 건너뜁니다.")
+            return
+        
+        # 1. 현재 조직 설정 조회
+        print("📝 현재 조직 설정 조회...")
+        response = self.client.get(
+            "/api/v1/organizations/current/settings",
+            headers=self.admin_headers
+        )
+        
+        if response.status_code == 200:
+            settings = response.json()
+            print(f"✅ 조직 설정 조회 성공")
+            print(f"현재 최대 메일 크기: {settings.get('settings', {}).get('max_mail_size_mb', 25)}MB")
+            print(f"현재 최대 첨부파일 크기: {settings.get('settings', {}).get('max_attachment_size_mb', 25)}MB")
+        else:
+            print(f"❌ 조직 설정 조회 실패: {response.status_code}")
+            print(f"응답 내용: {response.text}")
+            return
+        
+        # 2. 조직 설정 수정 (더 작은 크기로 설정)
+        print("📝 조직 설정 수정 (크기 제한 축소)...")
+        org_data = settings.get('organization', {})
+        org_id = org_data.get('org_id')
+        
+        if not org_id:
+            print("❌ 조직 ID를 찾을 수 없습니다.")
+            return
+        
+        update_settings = {
+            "max_mail_size_mb": 1,  # 1MB로 축소
+            "max_attachment_size_mb": 1  # 1MB로 축소
+        }
+        
+        response = self.client.put(
+            f"/api/v1/organizations/{org_id}/settings",
+            headers=self.admin_headers,
+            json=update_settings
+        )
+        
+        if response.status_code == 200:
+            print("✅ 조직 설정 수정 성공 (크기 제한 1MB로 축소)")
+        else:
+            print(f"❌ 조직 설정 수정 실패: {response.status_code}")
+            print(f"응답 내용: {response.text}")
+            return
+        
+        # 3. 수정된 설정으로 크기 제한 테스트
+        print("📝 수정된 설정으로 크기 제한 테스트...")
+        medium_content = "C" * (2 * 1024 * 1024)  # 2MB 텍스트 (1MB 제한 초과)
+        
+        test_mail_data = {
+            "to": ["test@skyboot.com"],
+            "subject": "수정된 설정 테스트",
+            "body_text": medium_content,
+            "priority": "NORMAL"
+        }
+        
+        response = self.client.post(
+            "/api/v1/mail/send-json",
+            headers=self.admin_headers,
+            json=test_mail_data
+        )
+        
+        if response.status_code == 413:
+            print("✅ 수정된 조직 설정 크기 제한 검증 성공 (413 에러)")
+        else:
+            print(f"❌ 수정된 조직 설정 크기 제한 검증 실패: {response.status_code}")
+            if response.status_code != 413:
+                print(f"응답 내용: {response.text}")
+        
+        # 4. 조직 설정 복원 (기본값으로)
+        print("📝 조직 설정 복원...")
+        restore_settings = {
+            "max_mail_size_mb": 25,  # 기본값으로 복원
+            "max_attachment_size_mb": 25  # 기본값으로 복원
+        }
+        
+        response = self.client.put(
+            f"/api/v1/organizations/{org_id}/settings",
+            headers=self.admin_headers,
+            json=restore_settings
+        )
+        
+        if response.status_code == 200:
+            print("✅ 조직 설정 복원 성공 (기본값 25MB)")
+        else:
+            print(f"❌ 조직 설정 복원 실패: {response.status_code}")
+            print(f"응답 내용: {response.text}")
+
 
 def run_tests():
     """테스트 실행 함수"""
@@ -429,7 +659,10 @@ def run_tests():
         test_instance.test_09_search_mails,
         test_instance.test_10_unauthorized_access,
         test_instance.test_11_invalid_mail_uuid,
-        test_instance.test_12_performance_test
+        test_instance.test_12_performance_test,
+        test_instance.test_13_mail_size_limits_send_endpoint,
+        test_instance.test_14_mail_size_limits_send_json_endpoint,
+        test_instance.test_15_organization_settings_size_limits
     ]
     
     # 테스트 실행
