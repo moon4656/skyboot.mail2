@@ -45,6 +45,9 @@ rq==1.15.1
 boto3==1.34.0
 pillow==10.1.0
 
+# Virus Scanning
+pyclamd==0.4.0
+
 # API Documentation and Validation
 pydantic-extra-types==2.2.0
 typing-extensions==4.8.0

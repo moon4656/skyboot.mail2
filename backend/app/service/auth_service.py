@@ -389,6 +389,54 @@ class AuthService:
         except Exception as e:
             logger.error(f"❌ 사용자 인증 실패: {str(e)}")
             return None
+    
+    def authenticate_user_by_email(self, email: str, password: str, org_id: Optional[str] = None):
+        """
+        이메일 기반 사용자 인증을 수행합니다.
+        
+        Args:
+            email: 이메일 주소
+            password: 비밀번호
+            org_id: 조직 ID (선택사항)
+            
+        Returns:
+            인증된 사용자 객체 또는 None
+        """
+        try:
+            logger.info(f"🔐 이메일 기반 사용자 인증 시도 - 이메일: {email}, 조직 ID: {org_id}")
+            
+            # 사용자 조회 (조직 ID가 있으면 조직 내에서만 검색)
+            query = self.db.query(User).filter(User.email == email)
+            if org_id:
+                query = query.filter(User.org_id == org_id)
+            
+            user = query.first()
+            if not user:
+                logger.warning(f"❌ 사용자를 찾을 수 없음 - 이메일: {email}, 조직 ID: {org_id}")
+                return None
+            
+            # 조직 활성화 상태 확인
+            organization = self.db.query(Organization).filter(Organization.org_id == user.org_id).first()
+            if not organization or not organization.is_active:
+                logger.warning(f"❌ 조직이 비활성화됨 - 조직 ID: {user.org_id}")
+                return None
+            
+            # 비밀번호 검증
+            if not AuthService.verify_password(password, user.hashed_password):
+                logger.warning(f"❌ 비밀번호 불일치 - 이메일: {email}")
+                return None
+            
+            # 사용자 활성화 상태 확인
+            if not user.is_active:
+                logger.warning(f"❌ 비활성화된 사용자 - 이메일: {email}")
+                return None
+            
+            logger.info(f"✅ 이메일 기반 사용자 인증 성공 - 이메일: {email}, 조직 ID: {user.org_id}")
+            return user
+            
+        except Exception as e:
+            logger.error(f"❌ 이메일 기반 사용자 인증 실패: {str(e)}")
+            return None
 
 def get_password_hash(password: str) -> str:
     """

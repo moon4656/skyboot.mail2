@@ -317,6 +317,33 @@ class MailStatsResponse(BaseModel):
     success: bool = Field(True, description="성공 여부")
     message: str = Field("통계 조회 성공", description="응답 메시지")
 
+# 조직 일일 사용량 스키마
+class OrgDailyUsage(BaseModel):
+    """조직 일일 사용량"""
+    usage_date: datetime = Field(..., description="사용량 기준일")
+    emails_sent_today: int = Field(0, description="오늘 발송된 메일 수")
+    emails_received_today: int = Field(0, description="오늘 수신된 메일 수")
+    total_emails_sent: int = Field(0, description="총 발송 메일 수")
+    total_emails_received: int = Field(0, description="총 수신 메일 수")
+    current_users: int = Field(0, description="현재 사용자 수")
+    current_storage_gb: int = Field(0, description="현재 저장 용량(GB)")
+
+class OrgUsageTodayResponse(BaseModel):
+    """조직 오늘 사용량 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("오늘 사용량 조회 성공", description="응답 메시지")
+    usage: OrgDailyUsage = Field(..., description="일일 사용량")
+    daily_limit: Optional[int] = Field(None, description="일일 발송 제한 (0=무제한)")
+    usage_percent: Optional[float] = Field(None, description="일일 제한 대비 사용률 (%)")
+    remaining_until_limit: Optional[int] = Field(None, description="제한까지 남은 발송 가능 수")
+
+class OrgUsageHistoryResponse(BaseModel):
+    """조직 사용량 히스토리 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("사용량 히스토리 조회 성공", description="응답 메시지")
+    items: List[OrgDailyUsage] = Field(default_factory=list, description="일일 사용량 목록")
+    total: int = Field(0, description="총 항목 수")
+
 # 폴더 관련 응답 스키마
 class FolderInfo(BaseModel):
     """폴더 정보 스키마"""
@@ -338,3 +365,160 @@ class FolderCreateResponse(BaseModel):
     folder_type: FolderType = Field(..., description="폴더 타입")
     mail_count: int = Field(..., description="폴더 내 메일 수")
     created_at: datetime = Field(..., description="생성 시간")
+
+# ===== 템플릿/서명/라벨/규칙/예약발송 스키마 =====
+
+class TemplateItem(BaseModel):
+    """템플릿 항목"""
+    template_id: str = Field(..., description="템플릿 ID")
+    name: str = Field(..., description="템플릿 이름")
+    subject: Optional[str] = Field(None, description="템플릿 제목")
+    body_text: Optional[str] = Field(None, description="템플릿 본문 (텍스트)")
+    body_html: Optional[str] = Field(None, description="템플릿 본문 (HTML)")
+
+class OrgTemplatesResponse(BaseModel):
+    """조직 템플릿 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("템플릿 조회 성공", description="응답 메시지")
+    templates: List[TemplateItem] = Field(default_factory=list, description="템플릿 목록")
+
+class SignatureResponse(BaseModel):
+    """서명 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("서명 조회 성공", description="응답 메시지")
+    org_default_signature: Optional[str] = Field(None, description="조직 기본 서명")
+    user_signature: Optional[str] = Field(None, description="사용자 서명")
+
+class SignatureUpdateRequest(BaseModel):
+    """서명 업데이트 요청"""
+    signature: str = Field(..., description="사용자 서명 내용")
+
+class LabelItem(BaseModel):
+    """라벨(커스텀 폴더) 항목"""
+    folder_uuid: str = Field(..., description="폴더 UUID")
+    name: str = Field(..., description="라벨명")
+
+class LabelsResponse(BaseModel):
+    """라벨 목록 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("라벨 조회 성공", description="응답 메시지")
+    labels: List[LabelItem] = Field(default_factory=list, description="라벨 목록")
+
+class RuleItem(BaseModel):
+    """메일 규칙 항목 (간단한 JSON 표현)"""
+    rule_id: str = Field(..., description="규칙 ID")
+    name: str = Field(..., description="규칙 이름")
+    condition: dict = Field(default_factory=dict, description="적용 조건")
+    action: dict = Field(default_factory=dict, description="실행 동작")
+
+class OrgRulesResponse(BaseModel):
+    """조직 규칙 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("규칙 조회 성공", description="응답 메시지")
+    rules: List[RuleItem] = Field(default_factory=list, description="규칙 목록")
+
+class ScheduleRequest(BaseModel):
+    """예약발송 요청"""
+    mail_uuid: str = Field(..., description="예약할 메일 UUID")
+    scheduled_at: datetime = Field(..., description="예약 발송 시간(UTC)")
+
+class RescheduleRequest(BaseModel):
+    """예약 재설정 요청"""
+    mail_uuid: str = Field(..., description="재예약할 메일 UUID")
+    scheduled_at: datetime = Field(..., description="새 예약 발송 시간(UTC)")
+
+class ScheduleResponse(BaseModel):
+    """예약 설정 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("예약 설정 성공", description="응답 메시지")
+    mail_uuid: str = Field(..., description="메일 UUID")
+    scheduled_at: datetime = Field(..., description="예약 발송 시간")
+
+class ScheduleDispatchResponse(BaseModel):
+    """예약 발송 처리 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("예약 메일 발송 완료", description="응답 메시지")
+    processed_count: int = Field(..., description="발송 처리된 메일 수")
+
+# ===== 필터/저장된 검색 스키마 =====
+
+class DateRange(BaseModel):
+    """날짜 범위 스키마"""
+    min_date: Optional[datetime] = Field(None, description="최소 날짜")
+    max_date: Optional[datetime] = Field(None, description="최대 날짜")
+
+class FiltersResponse(BaseModel):
+    """조직별 필터 제공 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("필터 조회 성공", description="응답 메시지")
+    statuses: List[MailStatus] = Field(default_factory=list, description="사용 가능한 상태 목록")
+    priorities: List[MailPriority] = Field(default_factory=list, description="사용 가능한 우선순위 목록")
+    sender_domains: List[str] = Field(default_factory=list, description="발신자 도메인 목록")
+    date_range: DateRange = Field(default_factory=DateRange, description="조직 메일 날짜 범위")
+    has_attachments_options: List[bool] = Field(default_factory=lambda: [True, False], description="첨부파일 옵션")
+
+class SavedSearchItem(BaseModel):
+    """저장된 검색 항목"""
+    search_id: str = Field(..., description="저장된 검색 ID")
+    name: str = Field(..., description="저장된 검색 이름")
+    query: Optional[str] = Field(None, description="검색어")
+    filters: Optional[dict] = Field(default_factory=dict, description="필터 조건 (키-값 JSON)")
+    created_at: Optional[datetime] = Field(None, description="생성 일시")
+
+class SavedSearchesResponse(BaseModel):
+    """저장된 검색 목록 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("저장된 검색 조회 성공", description="응답 메시지")
+    searches: List[SavedSearchItem] = Field(default_factory=list, description="저장된 검색 목록")
+
+# ===== 첨부파일 관리 스키마 =====
+
+class AttachmentItem(BaseModel):
+    """조직 단위 첨부파일 목록 항목"""
+    attachment_uuid: str = Field(..., description="첨부파일 UUID")
+    mail_uuid: str = Field(..., description="메일 UUID")
+    filename: str = Field(..., description="파일명")
+    file_size: int = Field(..., description="파일 크기 (bytes)")
+    content_type: Optional[str] = Field(None, description="MIME 타입")
+    created_at: datetime = Field(..., description="생성 일시")
+
+class AttachmentsResponse(BaseModel):
+    """조직 첨부파일 목록 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("첨부파일 조회 성공", description="응답 메시지")
+    attachments: List[AttachmentItem] = Field(default_factory=list, description="첨부파일 목록")
+    page: int = Field(1, description="페이지 번호")
+    limit: int = Field(20, description="페이지당 항목 수")
+    total: int = Field(0, description="총 항목 수")
+    total_pages: int = Field(0, description="총 페이지 수")
+
+class VirusScanRequest(BaseModel):
+    """바이러스 검사 요청"""
+    attachment_uuids: List[str] = Field(..., min_length=1, description="검사할 첨부파일 UUID 목록")
+
+class VirusScanResultItem(BaseModel):
+    """바이러스 검사 결과 항목"""
+    attachment_uuid: str = Field(..., description="첨부파일 UUID")
+    status: str = Field(..., description="검사 상태 (clean/infected/error)")
+    engine: str = Field("builtin", description="검사 엔진")
+    message: Optional[str] = Field(None, description="상세 메시지")
+    sha256: Optional[str] = Field(None, description="파일 SHA256 해시")
+
+class VirusScanResponse(BaseModel):
+    """바이러스 검사 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("바이러스 검사 완료", description="응답 메시지")
+    results: List[VirusScanResultItem] = Field(default_factory=list, description="검사 결과 목록")
+    infected_count: int = Field(0, description="감염 의심 파일 수")
+
+class AttachmentPreviewResponse(BaseModel):
+    """첨부파일 미리보기 응답"""
+    success: bool = Field(True, description="성공 여부")
+    message: str = Field("미리보기 제공", description="응답 메시지")
+    attachment_uuid: str = Field(..., description="첨부파일 UUID")
+    filename: str = Field(..., description="파일명")
+    content_type: Optional[str] = Field(None, description="콘텐츠 타입")
+    preview_type: str = Field(..., description="미리보기 타입 (text/image/unsupported)")
+    preview_text: Optional[str] = Field(None, description="텍스트 파일 미리보기")
+    preview_data_url: Optional[str] = Field(None, description="이미지 데이터 URL(Base64)")
+    download_url: Optional[str] = Field(None, description="다운로드 URL")

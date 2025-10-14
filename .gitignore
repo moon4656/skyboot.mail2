@@ -322,6 +322,10 @@ build/
 dist/
 out/
 
+# 바이러스 검사 테스트 파일
+virus_check/
+backend/virus_check/
+
 # 패키지 매니저 락 파일 (선택적)
 # package-lock.json
 # yarn.lock

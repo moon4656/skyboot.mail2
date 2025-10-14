@@ -17,6 +17,13 @@ from app.router.organization_router import router as organization_router
 from app.router.user_router import router as user_router
 from app.router.debug_router import router as debug_router
 from app.router.addressbook_router import router as addressbook_router
+from app.router.monitoring_router import router as monitoring_router
+from app.router.i18n_router import router as i18n_router
+from app.router.theme_router import router as theme_router
+from app.router.pwa_router import router as pwa_router
+from app.router.offline_router import router as offline_router
+from app.router.push_notification_router import router as push_notification_router
+from app.router.devops_router import router as devops_router
 
 # 데이터베이스 및 설정
 from app.database.user import engine, Base
@@ -25,12 +32,27 @@ from app.logging_config import setup_logging, get_logger
 
 # 미들웨어
 from app.middleware.tenant_middleware import TenantMiddleware
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from app.tasks.usage_reset import reset_daily_email_usage
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """애플리케이션 생명주기 관리"""
     # 시작 시 실행
     logger.info("🚀 SkyBoot Mail SaaS 애플리케이션 시작")
+
+    # APScheduler 초기화 및 자정 리셋 잡 등록
+    logger.info("🗓️ APScheduler 초기화")
+    scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
+    scheduler.add_job(
+        reset_daily_email_usage,
+        CronTrigger(hour=0, minute=0),
+        id="reset_daily_email_usage",
+        replace_existing=True
+    )
+    scheduler.start()
+    logger.info("✅ APScheduler 시작 및 자정 리셋 잡 등록 완료")
     
     # 데이터베이스 테이블 생성 (필요시 수동으로 실행)
     # logger.info("🗄️ 데이터베이스 테이블 생성 시작")
@@ -57,9 +79,15 @@ async def lifespan(app: FastAPI):
             logger.error(f"❌ 초기 설정 중 오류: {str(e)}")
     
     yield
-    
+
     # 종료 시 실행
     logger.info("🛑 SkyBoot Mail SaaS 애플리케이션 종료")
+    try:
+        logger.info("🛑 APScheduler 종료 시도")
+        scheduler.shutdown(wait=False)
+        logger.info("✅ APScheduler 종료 완료")
+    except Exception:
+        logger.warning("⚠️ APScheduler 종료 중 문제가 발생했지만 서버 종료를 계속 진행합니다")
 
 # 로깅 시스템 초기화
 setup_logging()
@@ -215,6 +243,18 @@ app.include_router(mail_convenience_router, prefix=f"{api_prefix}/mail", tags=["
 app.include_router(mail_advanced_router, prefix=f"{api_prefix}/mail", tags=["메일 고급"]) 
 app.include_router(mail_setup_router, prefix=f"{api_prefix}/mail", tags=["메일 설정"])
 app.include_router(addressbook_router, prefix=f"{api_prefix}/addressbook", tags=["주소록"])
+app.include_router(monitoring_router, prefix=f"{api_prefix}", tags=["모니터링"])
+
+# 국제화, 브랜딩, PWA, 오프라인, 푸시 알림 라우터 등록
+app.include_router(i18n_router, prefix=f"{api_prefix}", tags=["국제화"])
+app.include_router(theme_router, prefix=f"{api_prefix}", tags=["조직 테마"])
+app.include_router(pwa_router, prefix=f"{api_prefix}", tags=["PWA"])
+app.include_router(offline_router, prefix=f"{api_prefix}", tags=["오프라인"])
+app.include_router(push_notification_router, prefix=f"{api_prefix}", tags=["푸시 알림"])
+
+# DevOps 라우터 등록
+app.include_router(devops_router, prefix=f"{api_prefix}", tags=["DevOps"])
+logger.info("🛠️ DevOps 라우터 등록 완료")
 
 # 개발 환경에서만 디버그 라우터 추가
 if settings.is_development():

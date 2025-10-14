@@ -9,12 +9,29 @@ import logging
 from ..database.user import get_db
 from ..model.user_model import User
 from ..model.mail_model import Mail, MailUser, MailRecipient, MailAttachment, MailFolder, MailInFolder, MailLog
+from ..model.organization_model import Organization, OrganizationUsage, OrganizationSettings
 from ..schemas.mail_schema import (
     MailSearchRequest, MailSearchResponse, MailStatsResponse, APIResponse,
-    RecipientType, MailStatus, MailPriority, FolderType, MailUserResponse
+    RecipientType, MailStatus, MailPriority, FolderType, MailUserResponse,
+    OrgUsageTodayResponse, OrgUsageHistoryResponse, OrgDailyUsage,
+    OrgTemplatesResponse, TemplateItem,
+    SignatureResponse, SignatureUpdateRequest,
+    LabelsResponse, LabelItem,
+    OrgRulesResponse, RuleItem,
+    ScheduleRequest, RescheduleRequest, ScheduleResponse, ScheduleDispatchResponse,
+    FiltersResponse, SavedSearchItem, SavedSearchesResponse, DateRange,
+    AttachmentItem, AttachmentsResponse, VirusScanRequest, VirusScanResponse, VirusScanResultItem, AttachmentPreviewResponse
 )
 from ..service.auth_service import get_current_user
 from ..middleware.tenant_middleware import get_current_org_id
+from ..service.mail_service import MailService
+from ..service.virus_scan_service import get_virus_scanner
+from ..config import settings
+import json
+import os
+import base64
+import hashlib
+import mimetypes
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -58,15 +75,35 @@ async def search_mails(
             )
         )
         
-        # 검색 조건 적용
+        # 검색 조건 적용 (FTS + 부분일치 병행)
         if search_request.query:
             search_term = f"%{search_request.query}%"
-            query = query.filter(
-                or_(
-                    Mail.subject.ilike(search_term),
-                    Mail.body_text.ilike(search_term)
+            # PostgreSQL FTS: subject + body_text 결합하여 검색
+            try:
+                fts_vector = func.to_tsvector(
+                    'simple',
+                    func.concat(
+                        func.coalesce(Mail.subject, ''),
+                        ' ',
+                        func.coalesce(Mail.body_text, '')
+                    )
                 )
-            )
+                fts_query = func.plainto_tsquery('simple', search_request.query)
+                query = query.filter(
+                    or_(
+                        fts_vector.op('@@')(fts_query),
+                        Mail.subject.ilike(search_term),
+                        Mail.body_text.ilike(search_term)
+                    )
+                )
+            except Exception:
+                # FTS 사용 불가 시 부분일치만 수행
+                query = query.filter(
+                    or_(
+                        Mail.subject.ilike(search_term),
+                        Mail.body_text.ilike(search_term)
+                    )
+                )
         
         # 발신자 필터
         if search_request.sender_email:
@@ -109,16 +146,16 @@ async def search_mails(
         # 날짜 범위 필터
         if search_request.date_from:
             query = query.filter(Mail.created_at >= search_request.date_from)
-        
+
         if search_request.date_to:
             # 날짜 끝까지 포함하기 위해 하루 더함
             end_date = search_request.date_to + timedelta(days=1)
             query = query.filter(Mail.created_at < end_date)
-        
+
         # 상태 필터
         if search_request.status:
             query = query.filter(Mail.status == search_request.status)
-        
+
         # 폴더 타입 필터
         if search_request.folder_type:
             # 사용자의 해당 폴더 타입 폴더 조회
@@ -128,7 +165,7 @@ async def search_mails(
                     MailFolder.folder_type == search_request.folder_type
                 )
             ).first()
-            
+
             if user_folder:
                 # 해당 폴더에 있는 메일들만 필터링
                 folder_mail_uuids = db.query(MailInFolder.mail_uuid).filter(
@@ -143,17 +180,17 @@ async def search_mails(
             else:
                 # 폴더가 없으면 빈 결과 반환
                 query = query.filter(False)
-        
+
         # 우선순위 필터
         if search_request.priority:
             query = query.filter(Mail.priority == search_request.priority)
-        
+
         # 전체 개수
         total_count = query.count()
-        
+
         # 기본 정렬: 최신순
         query = query.order_by(desc(Mail.created_at))
-        
+
         # 페이지네이션
         page = search_request.page or 1
         limit = search_request.limit or 20
@@ -355,6 +392,129 @@ async def get_mail_stats(
         logger.error(f"❌ get_mail_stats 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         raise HTTPException(status_code=500, detail=f"메일 통계 조회 중 오류가 발생했습니다: {str(e)}")
 
+
+# ------------------------------
+# 조직 메일 사용량 관련 엔드포인트
+# ------------------------------
+
+@router.get("/usage", response_model=OrgUsageTodayResponse, summary="조직 오늘 발송 사용량")
+async def get_org_usage_today(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> OrgUsageTodayResponse:
+    """조직별로 오늘까지의 발송 통계를 제공합니다."""
+    try:
+        logger.info(f"📈 조직 오늘 사용량 조회 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
+
+        # 오늘 날짜 (UTC 기준)
+        today = datetime.now().date()
+
+        # 오늘 사용량 행들 조회 (동일 날짜의 중복 행이 있을 수 있어 합산/최대 사용)
+        usage_rows = db.query(OrganizationUsage).filter(
+            OrganizationUsage.org_id == current_org_id,
+            func.date(OrganizationUsage.usage_date) == today
+        ).all()
+
+        emails_sent_today = sum(row.emails_sent_today or 0 for row in usage_rows) if usage_rows else 0
+        emails_received_today = sum(row.emails_received_today or 0 for row in usage_rows) if usage_rows else 0
+        total_emails_sent = max([row.total_emails_sent or 0 for row in usage_rows] or [0])
+        total_emails_received = max([row.total_emails_received or 0 for row in usage_rows] or [0])
+        current_users = max([row.current_users or 0 for row in usage_rows] or [0])
+        current_storage_gb = max([row.current_storage_gb or 0 for row in usage_rows] or [0])
+
+        # 조직의 일일 발송 제한 조회
+        org = db.query(Organization).filter(Organization.org_id == current_org_id).first()
+        daily_limit = org.max_emails_per_day if org else None
+
+        usage_percent = None
+        remaining_until_limit = None
+        if daily_limit is not None and daily_limit > 0:
+            try:
+                usage_percent = round((emails_sent_today / daily_limit) * 100, 2)
+            except Exception:
+                usage_percent = 0.0
+            remaining_until_limit = max(daily_limit - emails_sent_today, 0)
+
+        usage = OrgDailyUsage(
+            usage_date=datetime.now(),
+            emails_sent_today=emails_sent_today,
+            emails_received_today=emails_received_today,
+            total_emails_sent=total_emails_sent,
+            total_emails_received=total_emails_received,
+            current_users=current_users,
+            current_storage_gb=current_storage_gb
+        )
+
+        return OrgUsageTodayResponse(
+            success=True,
+            message="오늘 사용량 조회 성공",
+            usage=usage,
+            daily_limit=daily_limit,
+            usage_percent=usage_percent,
+            remaining_until_limit=remaining_until_limit
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 오늘 사용량 조회 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"오늘 사용량 조회 중 오류가 발생했습니다: {str(e)}")
+
+
+@router.get("/usage/history", response_model=OrgUsageHistoryResponse, summary="조직 발송 이력 통계")
+async def get_org_usage_history(
+    days: int = Query(30, ge=1, le=365, description="조회 일수"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+) -> OrgUsageHistoryResponse:
+    """조직별 발송 이력 통계를 일별로 제공합니다."""
+    try:
+        logger.info(f"📈 조직 사용량 히스토리 조회 시작 - 조직: {current_org_id}, 일수: {days}")
+
+        today = datetime.now().date()
+        start_date = today - timedelta(days=days - 1)
+
+        usage_day = func.date(OrganizationUsage.usage_date)
+        rows = db.query(
+            usage_day.label('usage_day'),
+            func.sum(OrganizationUsage.emails_sent_today).label('emails_sent_today'),
+            func.sum(OrganizationUsage.emails_received_today).label('emails_received_today'),
+            func.max(OrganizationUsage.total_emails_sent).label('total_emails_sent'),
+            func.max(OrganizationUsage.total_emails_received).label('total_emails_received'),
+            func.max(OrganizationUsage.current_users).label('current_users'),
+            func.max(OrganizationUsage.current_storage_gb).label('current_storage_gb')
+        ).filter(
+            OrganizationUsage.org_id == current_org_id,
+            usage_day >= start_date,
+            usage_day <= today
+        ).group_by(usage_day).order_by(usage_day.desc()).all()
+
+        items: List[OrgDailyUsage] = []
+        for r in rows:
+            # usage_day는 date 객체이므로 해당 날짜의 00:00으로 변환
+            usage_dt = datetime.combine(r.usage_day, datetime.min.time())
+            items.append(OrgDailyUsage(
+                usage_date=usage_dt,
+                emails_sent_today=int(r.emails_sent_today or 0),
+                emails_received_today=int(r.emails_received_today or 0),
+                total_emails_sent=int(r.total_emails_sent or 0),
+                total_emails_received=int(r.total_emails_received or 0),
+                current_users=int(r.current_users or 0),
+                current_storage_gb=int(r.current_storage_gb or 0)
+            ))
+
+        return OrgUsageHistoryResponse(
+            success=True,
+            message="사용량 히스토리 조회 성공",
+            items=items,
+            total=len(items)
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 사용량 히스토리 조회 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"사용량 히스토리 조회 중 오류가 발생했습니다: {str(e)}")
 
 @router.get("/unread", response_model=APIResponse, summary="읽지 않은 메일만 조회")
 async def get_unread_mails(
@@ -1160,3 +1320,661 @@ async def get_search_suggestions(
                 "total": 0
             }
         )
+
+# =========================
+# 템플릿 / 서명 / 라벨 / 규칙
+# =========================
+
+@router.get("/templates", response_model=OrgTemplatesResponse, summary="조직 템플릿 조회")
+async def get_org_templates(
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> OrgTemplatesResponse:
+    try:
+        setting = db.query(OrganizationSettings).filter(
+            OrganizationSettings.org_id == current_org_id,
+            OrganizationSettings.setting_key == "mail_templates"
+        ).first()
+
+        templates: List[TemplateItem] = []
+        if setting and setting.setting_value:
+            try:
+                data = json.loads(setting.setting_value)
+                for t in data or []:
+                    templates.append(TemplateItem(**t))
+            except Exception:
+                logger.warning("⚠️ 템플릿 JSON 파싱 실패, 빈 목록 반환")
+
+        return OrgTemplatesResponse(success=True, message="템플릿 조회 성공", templates=templates)
+    except Exception as e:
+        logger.error(f"❌ 템플릿 조회 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        return OrgTemplatesResponse(success=False, message=f"템플릿 조회 실패: {str(e)}", templates=[])
+
+
+@router.get("/signatures", response_model=SignatureResponse, summary="조직/사용자 서명 조회")
+async def get_signatures(
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> SignatureResponse:
+    try:
+        # 사용자 메일 설정
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.user_uuid,
+            MailUser.org_id == current_org_id
+        ).first()
+
+        # 조직 기본 서명
+        org_sign_setting = db.query(OrganizationSettings).filter(
+            OrganizationSettings.org_id == current_org_id,
+            OrganizationSettings.setting_key == "mail_default_signature"
+        ).first()
+
+        org_default = None
+        if org_sign_setting and org_sign_setting.setting_value:
+            org_default = org_sign_setting.setting_value
+
+        return SignatureResponse(
+            success=True,
+            message="서명 조회 성공",
+            org_default_signature=org_default,
+            user_signature=mail_user.signature if mail_user else None
+        )
+    except Exception as e:
+        logger.error(f"❌ 서명 조회 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        return SignatureResponse(success=False, message=f"서명 조회 실패: {str(e)}")
+
+
+@router.get("/labels", response_model=LabelsResponse, summary="라벨 목록 조회")
+async def get_labels(
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> LabelsResponse:
+    try:
+        # 사용자 라벨(커스텀 폴더)
+        mail_user = db.query(MailUser).filter(
+            MailUser.user_uuid == current_user.user_uuid,
+            MailUser.org_id == current_org_id
+        ).first()
+        if not mail_user:
+            raise HTTPException(status_code=404, detail="메일 사용자를 찾을 수 없습니다.")
+
+        folders = db.query(MailFolder).filter(
+            MailFolder.org_id == current_org_id,
+            MailFolder.user_uuid == mail_user.user_uuid,
+            MailFolder.folder_type == FolderType.CUSTOM
+        ).all()
+
+        labels = [LabelItem(folder_uuid=f.folder_uuid, name=f.name) for f in folders]
+        return LabelsResponse(success=True, message="라벨 조회 성공", labels=labels)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 라벨 조회 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        return LabelsResponse(success=False, message=f"라벨 조회 실패: {str(e)}", labels=[])
+
+
+@router.get("/rules", response_model=OrgRulesResponse, summary="조직 규칙 조회")
+async def get_org_rules(
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> OrgRulesResponse:
+    try:
+        setting = db.query(OrganizationSettings).filter(
+            OrganizationSettings.org_id == current_org_id,
+            OrganizationSettings.setting_key == "mail_rules"
+        ).first()
+
+        rules: List[RuleItem] = []
+        if setting and setting.setting_value:
+            try:
+                data = json.loads(setting.setting_value)
+                for r in data or []:
+                    rules.append(RuleItem(**r))
+            except Exception:
+                logger.warning("⚠️ 규칙 JSON 파싱 실패, 빈 목록 반환")
+
+        return OrgRulesResponse(success=True, message="규칙 조회 성공", rules=rules)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 규칙 조회 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        return OrgRulesResponse(success=False, message=f"규칙 조회 실패: {str(e)}", rules=[])
+
+@router.get("/filters", response_model=FiltersResponse, summary="조직별 필터 제공")
+async def get_org_filters(
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> FiltersResponse:
+    """조직 전체 메일 데이터 기반 필터 옵션 제공"""
+    try:
+        logger.info(f"🔍 get_org_filters 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
+
+        # 상태 목록
+        status_rows = db.query(Mail.status).filter(Mail.org_id == current_org_id).distinct().all()
+        statuses = []
+        for (status,) in status_rows:
+            # MailStatus Enum 호환 처리
+            try:
+                statuses.append(MailStatus(status))
+            except Exception:
+                # 알 수 없는 상태는 문자열로 무시
+                pass
+
+        # 우선순위 목록
+        priority_rows = db.query(Mail.priority).filter(Mail.org_id == current_org_id).distinct().all()
+        priorities = []
+        for (priority,) in priority_rows:
+            try:
+                priorities.append(MailPriority(priority))
+            except Exception:
+                pass
+
+        # 발신자 도메인 목록 (최대 50개)
+        sender_emails = db.query(MailUser.email).join(Mail, Mail.sender_uuid == MailUser.user_uuid).\
+            filter(Mail.org_id == current_org_id).distinct().all()
+        domains = set()
+        for (email,) in sender_emails:
+            if email and '@' in email:
+                domains.add(email.split('@')[-1].lower())
+        sender_domains = sorted(list(domains))[:50]
+
+        # 날짜 범위
+        min_date = db.query(func.min(Mail.created_at)).filter(Mail.org_id == current_org_id).scalar()
+        max_date = db.query(func.max(Mail.created_at)).filter(Mail.org_id == current_org_id).scalar()
+        date_range = DateRange(min_date=min_date, max_date=max_date)
+
+        return FiltersResponse(
+            success=True,
+            message="필터 조회 성공",
+            statuses=statuses,
+            priorities=priorities,
+            sender_domains=sender_domains,
+            date_range=date_range,
+            has_attachments_options=[True, False]
+        )
+    except Exception as e:
+        logger.error(f"❌ 필터 조회 실패 - 조직: {current_org_id}, 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"필터 조회 실패: {str(e)}")
+
+@router.get("/saved-searches", response_model=SavedSearchesResponse, summary="조직 저장된 검색 조회")
+async def get_saved_searches(
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> SavedSearchesResponse:
+    """조직 설정에 저장된 검색 목록 제공"""
+    try:
+        logger.info(f"💾 get_saved_searches 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
+
+        settings = db.query(OrganizationSettings).filter(
+            and_(
+                OrganizationSettings.org_id == current_org_id,
+                OrganizationSettings.setting_key == 'mail_saved_searches'
+            )
+        ).first()
+
+        searches: List[SavedSearchItem] = []
+        if settings and settings.setting_value:
+            try:
+                raw = json.loads(settings.setting_value)
+                if isinstance(raw, list):
+                    for item in raw:
+                        try:
+                            searches.append(SavedSearchItem(
+                                search_id=item.get('search_id') or item.get('id') or '',
+                                name=item.get('name') or '검색',
+                                query=item.get('query'),
+                                filters=item.get('filters') or {},
+                                created_at=item.get('created_at')
+                            ))
+                        except Exception:
+                            # 항목 파싱 실패 시 무시
+                            continue
+            except Exception:
+                logger.warning("저장된 검색 설정 JSON 파싱 실패")
+
+        return SavedSearchesResponse(success=True, message="저장된 검색 조회 성공", searches=searches)
+    except Exception as e:
+        logger.error(f"❌ 저장된 검색 조회 실패 - 조직: {current_org_id}, 오류: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"저장된 검색 조회 실패: {str(e)}")
+    except Exception as e:
+        logger.error(f"❌ 규칙 조회 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        return OrgRulesResponse(success=False, message=f"규칙 조회 실패: {str(e)}", rules=[])
+
+
+# =========================
+# 첨부파일 관리 (조직 단위)
+# =========================
+
+@router.get("/attachments", response_model=AttachmentsResponse, summary="조직 첨부파일 목록 조회")
+async def list_attachments(
+    filename: Optional[str] = Query(None, description="파일명 부분 일치"),
+    content_type: Optional[str] = Query(None, description="MIME 타입 부분 일치"),
+    mail_uuid: Optional[str] = Query(None, description="특정 메일 UUID로 필터"),
+    date_from: Optional[datetime] = Query(None, description="시작 날짜"),
+    date_to: Optional[datetime] = Query(None, description="종료 날짜"),
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    limit: int = Query(20, ge=1, le=100, description="페이지당 항목 수"),
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> AttachmentsResponse:
+    try:
+        # 조직 단위로 첨부파일 조회 (Mail과 조인하여 org_id 기준으로 필터링)
+        q = db.query(MailAttachment).join(Mail, Mail.mail_uuid == MailAttachment.mail_uuid).filter(
+            Mail.org_id == current_org_id
+        )
+
+        if filename:
+            q = q.filter(MailAttachment.filename.ilike(f"%{filename}%"))
+        if content_type:
+            q = q.filter(MailAttachment.content_type.ilike(f"%{content_type}%"))
+        if mail_uuid:
+            q = q.filter(MailAttachment.mail_uuid == mail_uuid)
+        if date_from:
+            q = q.filter(MailAttachment.created_at >= date_from)
+        if date_to:
+            q = q.filter(MailAttachment.created_at <= date_to)
+
+        total = q.count()
+        items = q.order_by(desc(MailAttachment.created_at)).offset((page - 1) * limit).limit(limit).all()
+
+        attachments: List[AttachmentItem] = []
+        for a in items:
+            attachments.append(AttachmentItem(
+                attachment_uuid=a.attachment_uuid,
+                mail_uuid=a.mail_uuid,
+                filename=a.filename,
+                file_size=a.file_size,
+                content_type=a.content_type,
+                created_at=a.created_at
+            ))
+
+        total_pages = (total + limit - 1) // limit
+        logger.info(f"✅ 첨부파일 목록 조회 - 조직: {current_org_id}, 사용자: {current_user.email}, 총 {total}건")
+        return AttachmentsResponse(
+            success=True,
+            message="첨부파일 조회 성공",
+            attachments=attachments,
+            page=page,
+            limit=limit,
+            total=total,
+            total_pages=total_pages
+        )
+    except Exception as e:
+        logger.error(f"❌ 첨부파일 목록 조회 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"첨부파일 목록 조회 실패: {str(e)}")
+
+
+@router.post("/attachments/virus-scan", response_model=VirusScanResponse, summary="첨부파일 바이러스 검사")
+async def virus_scan_attachments(
+    req: VirusScanRequest,
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> VirusScanResponse:
+    """
+    ClamAV를 사용하여 첨부파일 바이러스 검사를 수행합니다.
+    
+    - **attachment_uuids**: 검사할 첨부파일 UUID 목록
+    - **engine**: ClamAV 또는 휴리스틱 검사 엔진 사용
+    - **조직별 격리**: 조직 소속 첨부파일만 검사 가능
+    - **자동 격리**: 감염된 파일 자동 격리 (설정 시)
+    """
+    try:
+        if not settings.VIRUS_SCAN_ENABLED:
+            raise HTTPException(status_code=503, detail="바이러스 검사 기능이 비활성화되어 있습니다")
+        
+        results: List[VirusScanResultItem] = []
+        infected_count = 0
+        
+        # 바이러스 스캐너 인스턴스 가져오기
+        virus_scanner = get_virus_scanner()
+        
+        logger.info(f"🦠 바이러스 검사 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 첨부파일 수: {len(req.attachment_uuids)}")
+
+        for att_uuid in req.attachment_uuids:
+            try:
+                # 첨부파일 및 조직 소속 확인
+                attachment = db.query(MailAttachment).filter(MailAttachment.attachment_uuid == att_uuid).first()
+                if not attachment:
+                    results.append(VirusScanResultItem(
+                        attachment_uuid=att_uuid,
+                        status="error",
+                        engine="validation",
+                        message="첨부파일을 찾을 수 없습니다",
+                        sha256=None
+                    ))
+                    continue
+
+                mail = db.query(Mail).filter(Mail.mail_uuid == attachment.mail_uuid).first()
+                if not mail or mail.org_id != current_org_id:
+                    results.append(VirusScanResultItem(
+                        attachment_uuid=att_uuid,
+                        status="error",
+                        engine="validation",
+                        message="권한이 없거나 다른 조직 소속 첨부파일입니다",
+                        sha256=None
+                    ))
+                    continue
+
+                if not attachment.file_path or not os.path.exists(attachment.file_path):
+                    results.append(VirusScanResultItem(
+                        attachment_uuid=att_uuid,
+                        status="error",
+                        engine="validation",
+                        message="첨부파일이 서버에 존재하지 않습니다",
+                        sha256=None
+                    ))
+                    continue
+
+                # 파일 크기 확인
+                file_size_mb = os.path.getsize(attachment.file_path) / (1024 * 1024)
+                if file_size_mb > settings.VIRUS_SCAN_MAX_FILE_SIZE_MB:
+                    results.append(VirusScanResultItem(
+                        attachment_uuid=att_uuid,
+                        status="error",
+                        engine="validation",
+                        message=f"파일 크기가 너무 큽니다 ({file_size_mb:.1f}MB > {settings.VIRUS_SCAN_MAX_FILE_SIZE_MB}MB)",
+                        sha256=None
+                    ))
+                    continue
+
+                # ClamAV 바이러스 검사 수행
+                logger.info(f"🔍 바이러스 검사 수행 - 파일: {attachment.filename}, 크기: {file_size_mb:.1f}MB")
+                scan_result = virus_scanner.scan_file(attachment.file_path)
+                
+                # 결과 변환
+                if scan_result.error_message:
+                    status = "error"
+                    message = scan_result.error_message
+                elif scan_result.is_infected:
+                    status = "infected"
+                    message = f"바이러스 발견: {scan_result.virus_name}"
+                    infected_count += 1
+                    
+                    # 감염된 파일 로깅
+                    logger.warning(f"🦠 바이러스 발견 - 조직: {current_org_id}, 파일: {attachment.filename}, 바이러스: {scan_result.virus_name}")
+                else:
+                    status = "clean"
+                    message = None
+
+                results.append(VirusScanResultItem(
+                    attachment_uuid=att_uuid,
+                    status=status,
+                    engine=scan_result.engine,
+                    message=message,
+                    sha256=scan_result.file_hash
+                ))
+                
+            except Exception as inner_e:
+                logger.error(f"❌ 첨부파일 바이러스 검사 중 오류 - 첨부UUID: {att_uuid}, 에러: {str(inner_e)}")
+                results.append(VirusScanResultItem(
+                    attachment_uuid=att_uuid,
+                    status="error",
+                    engine="system_error",
+                    message=f"검사 중 오류 발생: {str(inner_e)}",
+                    sha256=None
+                ))
+
+        # 검사 완료 로깅
+        logger.info(f"✅ 바이러스 검사 완료 - 조직: {current_org_id}, 총 파일: {len(req.attachment_uuids)}, 감염: {infected_count}")
+        
+        return VirusScanResponse(
+            success=True,
+            message=f"바이러스 검사 완료 - 총 {len(req.attachment_uuids)}개 파일 중 {infected_count}개 감염",
+            results=results,
+            infected_count=infected_count
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 바이러스 검사 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"바이러스 검사 실패: {str(e)}")
+
+
+@router.get("/attachments/preview", response_model=AttachmentPreviewResponse, summary="첨부파일 미리보기")
+async def preview_attachment(
+    attachment_uuid: str = Query(..., description="첨부파일 UUID"),
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> AttachmentPreviewResponse:
+    try:
+        attachment = db.query(MailAttachment).filter(MailAttachment.attachment_uuid == attachment_uuid).first()
+        if not attachment:
+            raise HTTPException(status_code=404, detail="첨부파일을 찾을 수 없습니다")
+
+        mail = db.query(Mail).filter(Mail.mail_uuid == attachment.mail_uuid).first()
+        if not mail or mail.org_id != current_org_id:
+            raise HTTPException(status_code=403, detail="접근 권한이 없습니다")
+
+        if not attachment.file_path or not os.path.exists(attachment.file_path):
+            raise HTTPException(status_code=404, detail="첨부파일이 서버에 존재하지 않습니다")
+
+        # 콘텐츠 타입 확인 및 보완
+        content_type = attachment.content_type or mimetypes.guess_type(attachment.filename)[0]
+
+        preview_type = "unsupported"
+        preview_text = None
+        preview_data_url = None
+
+        try:
+            if content_type and content_type.startswith("text/"):
+                # 텍스트 파일은 앞부분만 읽어 미리보기 제공 (최대 32KB)
+                with open(attachment.file_path, "rb") as f:
+                    blob = f.read(32 * 1024)
+                # 인코딩 추정 없이 UTF-8 우선, 실패 시 cp949/latin-1 시도
+                for enc in ["utf-8", "cp949", "latin-1"]:
+                    try:
+                        preview_text = blob.decode(enc)
+                        preview_type = "text"
+                        break
+                    except Exception:
+                        continue
+            elif content_type and content_type.startswith("image/"):
+                with open(attachment.file_path, "rb") as f:
+                    blob = f.read()
+                b64 = base64.b64encode(blob).decode("ascii")
+                preview_data_url = f"data:{content_type};base64,{b64}"
+                preview_type = "image"
+            else:
+                preview_type = "unsupported"
+        except Exception as p_err:
+            logger.warning(f"⚠️ 미리보기 처리 중 오류 - 첨부UUID: {attachment_uuid}, 에러: {str(p_err)}")
+            preview_type = "unsupported"
+
+        download_url = f"/api/v1/mail/attachments/{attachment.attachment_uuid}"
+        return AttachmentPreviewResponse(
+            success=True,
+            message="미리보기 제공",
+            attachment_uuid=attachment.attachment_uuid,
+            filename=attachment.filename,
+            content_type=content_type,
+            preview_type=preview_type,
+            preview_text=preview_text,
+            preview_data_url=preview_data_url,
+            download_url=download_url
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 첨부파일 미리보기 실패 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"첨부파일 미리보기 실패: {str(e)}")
+
+
+# =========================
+# 예약 설정 / 예약 발송 처리
+# =========================
+
+@router.post("/reschedule", response_model=ScheduleResponse, summary="예약 메일 재설정")
+async def reschedule_mail(
+    req: RescheduleRequest,
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> ScheduleResponse:
+    try:
+        # 메일 존재 확인 (조직 격리)
+        mail = db.query(Mail).filter(
+            Mail.mail_uuid == req.mail_uuid,
+            Mail.org_id == current_org_id
+        ).first()
+        if not mail:
+            raise HTTPException(status_code=404, detail="메일을 찾을 수 없습니다.")
+
+        # 스케줄 설정 읽기
+        setting = db.query(OrganizationSettings).filter(
+            OrganizationSettings.org_id == current_org_id,
+            OrganizationSettings.setting_key == "mail_schedules"
+        ).first()
+
+        schedules: List[Dict[str, Any]] = []
+        if setting and setting.setting_value:
+            try:
+                schedules = json.loads(setting.setting_value) or []
+            except Exception:
+                schedules = []
+
+        # 기존 항목 업데이트 또는 추가
+        updated = False
+        for s in schedules:
+            if s.get("mail_uuid") == req.mail_uuid:
+                s["scheduled_at"] = req.scheduled_at.isoformat()
+                updated = True
+                break
+        if not updated:
+            schedules.append({"mail_uuid": req.mail_uuid, "scheduled_at": req.scheduled_at.isoformat()})
+
+        # 저장
+        if not setting:
+            setting = OrganizationSettings(
+                org_id=current_org_id,
+                setting_key="mail_schedules",
+                setting_type="json",
+                setting_value=json.dumps(schedules, ensure_ascii=False)
+            )
+            db.add(setting)
+        else:
+            setting.setting_value = json.dumps(schedules, ensure_ascii=False)
+        db.commit()
+
+        return ScheduleResponse(success=True, message="예약 재설정 성공", mail_uuid=req.mail_uuid, scheduled_at=req.scheduled_at)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 예약 재설정 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        return ScheduleResponse(success=False, message=f"예약 재설정 실패: {str(e)}", mail_uuid=req.mail_uuid, scheduled_at=req.scheduled_at)
+
+
+@router.post("/schedule", response_model=ScheduleDispatchResponse, summary="예약 메일 발송 처리")
+async def process_scheduled_mails(
+    limit: int = Query(50, description="최대 처리 메일 수"),
+    current_user: User = Depends(get_current_user),
+    current_org_id: str = Depends(get_current_org_id),
+    db: Session = Depends(get_db)
+) -> ScheduleDispatchResponse:
+    try:
+        now = datetime.utcnow()
+        setting = db.query(OrganizationSettings).filter(
+            OrganizationSettings.org_id == current_org_id,
+            OrganizationSettings.setting_key == "mail_schedules"
+        ).first()
+
+        schedules: List[Dict[str, Any]] = []
+        if setting and setting.setting_value:
+            try:
+                schedules = json.loads(setting.setting_value) or []
+            except Exception:
+                schedules = []
+
+        # 처리 대상 선정
+        ready: List[Dict[str, Any]] = []
+        pending: List[Dict[str, Any]] = []
+        for s in schedules:
+            try:
+                ts = datetime.fromisoformat(s.get("scheduled_at"))
+            except Exception:
+                ts = None
+            if ts and ts <= now and len(ready) < limit:
+                ready.append(s)
+            else:
+                pending.append(s)
+
+        processed = 0
+        mail_service = MailService(db=db)
+
+        for s in ready:
+            mail_uuid = s.get("mail_uuid")
+            if not mail_uuid:
+                continue
+
+            mail = db.query(Mail).filter(
+                Mail.mail_uuid == mail_uuid,
+                Mail.org_id == current_org_id
+            ).first()
+            if not mail:
+                logger.warning(f"⚠️ 예약 메일을 찾을 수 없음: {mail_uuid}")
+                continue
+
+            sender = db.query(MailUser).filter(MailUser.user_uuid == mail.sender_uuid).first()
+            if not sender:
+                logger.warning(f"⚠️ 발신자 정보를 찾을 수 없음: {mail_uuid}")
+                continue
+
+            recips = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
+            recipient_emails = [r.recipient_email for r in recips]
+
+            atts = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).all()
+            attachments = [
+                {"file_path": a.file_path, "filename": a.filename}
+                for a in atts if a.file_path
+            ]
+
+            result = await mail_service.send_email_smtp(
+                sender_email=sender.email,
+                recipient_emails=recipient_emails,
+                subject=mail.subject or "(제목 없음)",
+                body_text=mail.body_text or "",
+                body_html=mail.body_html,
+                org_id=current_org_id,
+                attachments=attachments
+            )
+
+            if result.get("success"):
+                # 상태 갱신
+                mail.status = MailStatus.SENT
+                mail.sent_at = datetime.utcnow()
+                db.add(mail)
+                processed += 1
+            else:
+                logger.error(f"❌ 예약 메일 발송 실패 - {mail_uuid}: {result}")
+
+        # 스케줄 목록 갱신 (처리된 항목 제거)
+        remaining = [s for s in pending]
+        setting_value = json.dumps(remaining, ensure_ascii=False)
+        if not setting:
+            setting = OrganizationSettings(
+                org_id=current_org_id,
+                setting_key="mail_schedules",
+                setting_type="json",
+                setting_value=setting_value
+            )
+            db.add(setting)
+        else:
+            setting.setting_value = setting_value
+
+        db.commit()
+
+        return ScheduleDispatchResponse(success=True, message="예약 메일 발송 완료", processed_count=processed)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 예약 메일 발송 처리 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        return ScheduleDispatchResponse(success=False, message=f"예약 메일 발송 처리 실패: {str(e)}", processed_count=0)

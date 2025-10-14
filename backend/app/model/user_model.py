@@ -29,6 +29,12 @@ class User(Base):
     is_email_verified = Column(Boolean, default=False, comment="이메일 인증 여부")
     last_login_at = Column(DateTime(timezone=True), comment="마지막 로그인 시간")
     
+    # 2FA 관련 필드
+    is_2fa_enabled = Column(Boolean, default=False, comment="2FA 활성화 여부")
+    totp_secret = Column(String(32), comment="TOTP 시크릿 키")
+    backup_codes = Column(Text, comment="백업 코드 JSON")
+    last_2fa_at = Column(DateTime(timezone=True), comment="마지막 2FA 인증 시간")
+    
     # 시간 정보
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="생성 시간")
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), comment="수정 시간")

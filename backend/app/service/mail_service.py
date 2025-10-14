@@ -234,8 +234,18 @@ class MailService:
             
             # 조직 사용량 업데이트
             logger.info(f"🔍 조직 사용량 업데이트 호출 직전 - 조직: {org_id}, 수신자 수: {len(all_recipients)}")
-            await self._update_organization_usage(org_id, len(all_recipients))
+            usage_update = await self._update_organization_usage(org_id, len(all_recipients))
             logger.info(f"🔍 조직 사용량 업데이트 호출 완료 - 조직: {org_id}")
+
+            # 임계값 알림 확인 및 전송 (80%/90%/100%)
+            try:
+                if organization and usage_update:
+                    daily_limit = organization.max_emails_per_day or 0
+                    today_sent = usage_update.get('emails_sent_today') or 0
+                    increment = len(all_recipients)
+                    await self._notify_usage_thresholds(org_id, today_sent, increment, daily_limit)
+            except Exception as notify_err:
+                logger.error(f"⚠️ 임계값 알림 처리 중 오류 - 조직: {org_id}, 오류: {str(notify_err)}")
             
             self.db.commit()
             
@@ -530,8 +540,19 @@ class MailService:
             if result.get('success', False) and org_id and self.db:
                 logger.info(f"🔍 조직 사용량 업데이트 호출 (send_email_smtp) - 조직: {org_id}, 수신자 수: {len(recipient_emails)}")
                 try:
-                    await self._update_organization_usage(org_id, len(recipient_emails))
+                    usage_update = await self._update_organization_usage(org_id, len(recipient_emails))
                     logger.info(f"✅ 조직 사용량 업데이트 완료 (send_email_smtp) - 조직: {org_id}")
+
+                    # 임계값 알림 확인 및 전송
+                    try:
+                        organization = self.db.query(Organization).filter(Organization.org_id == org_id).first()
+                        if organization and usage_update:
+                            daily_limit = organization.max_emails_per_day or 0
+                            today_sent = usage_update.get('emails_sent_today') or 0
+                            increment = len(recipient_emails)
+                            await self._notify_usage_thresholds(org_id, today_sent, increment, daily_limit)
+                    except Exception as notify_err:
+                        logger.error(f"⚠️ 임계값 알림 처리 중 오류 (send_email_smtp) - 조직: {org_id}, 오류: {str(notify_err)}")
                 except Exception as usage_error:
                     logger.error(f"❌ 조직 사용량 업데이트 실패 (send_email_smtp) - 조직: {org_id}, 오류: {str(usage_error)}")
                     logger.error(f"❌ 상세 스택 트레이스: {traceback.format_exc()}")
@@ -1232,7 +1253,10 @@ class MailService:
                 # 트랜잭션 커밋
                 self.db.commit()
                 logger.info(f"✅ _update_organization_usage 완료 - 조직: {org_id}, 시도: {attempt + 1}")
-                return
+                return {
+                    'emails_sent_today': emails_sent_today if row else None,
+                    'total_emails_sent': total_emails_sent if row else None,
+                }
                 
             except Exception as e:
                 # 트랜잭션 롤백
@@ -1331,6 +1355,10 @@ class MailService:
                 # 트랜잭션 커밋
                 self.db.commit()
                 logger.info(f"✅ Redis 락을 사용한 조직 사용량 업데이트 완료 - 조직: {org_id}")
+                return {
+                    'emails_sent_today': usage.emails_sent_today,
+                    'total_emails_sent': usage.total_emails_sent,
+                }
                 
         except Exception as e:
             self.db.rollback()
@@ -1340,6 +1368,74 @@ class MailService:
             # Redis 락 실패 시 기본 UPSERT 방식으로 대체
             logger.info(f"🔄 기본 UPSERT 방식으로 재시도 - 조직: {org_id}")
             return await self._update_organization_usage(org_id, email_count)
+
+    async def _notify_usage_thresholds(self, org_id: str, today_sent: int, increment: int, daily_limit: int) -> None:
+        """
+        일일 발송 제한 대비 임계값(80%/90%/100%) 도달 시 조직 관리자에게 알림을 발송합니다.
+
+        Args:
+            org_id: 조직 ID
+            today_sent: 업데이트 후 오늘 발송 건수
+            increment: 이번 발송으로 증가한 건수
+            daily_limit: 조직의 일일 발송 최대치
+        """
+        try:
+            if not daily_limit or daily_limit <= 0:
+                return
+
+            prev_sent = max(today_sent - increment, 0)
+            prev_percent = (prev_sent / daily_limit) * 100
+            new_percent = (today_sent / daily_limit) * 100
+
+            thresholds = [80, 90, 100]
+            crossed = [t for t in thresholds if prev_percent < t <= new_percent]
+            if not crossed:
+                return
+
+            # 관리자 이메일과 발신자 구성
+            org = self.db.query(Organization).filter(Organization.org_id == org_id).first()
+            if not org or not org.admin_email:
+                logger.warning(f"⚠️ 조직 관리자 이메일이 없어 알림을 건너뜁니다 - 조직: {org_id}")
+                return
+
+            sender_email = None
+            if getattr(org, 'domain', None):
+                sender_email = f"no-reply@{org.domain}"
+            elif self.smtp_username:
+                sender_email = self.smtp_username
+            else:
+                sender_email = "no-reply@localhost"
+
+            # 한 번에 가장 높은 임계값만 알림 (중복 방지)
+            highest = max(crossed)
+            subject = f"[알림] 일일 메일 발송 {highest}% 임계값 도달"
+            body_text = (
+                f"조직 ID: {org_id}\n"
+                f"일일 제한: {daily_limit}건\n"
+                f"오늘 발송: {today_sent}건 (+{increment})\n"
+                f"현재 사용률: {new_percent:.2f}%\n"
+                f"임계값 {highest}%를 방금 초과했습니다.\n"
+            )
+            body_html = (
+                f"<p><strong>조직 ID:</strong> {org_id}</p>"
+                f"<p><strong>일일 제한:</strong> {daily_limit}건</p>"
+                f"<p><strong>오늘 발송:</strong> {today_sent}건 (+{increment})</p>"
+                f"<p><strong>현재 사용률:</strong> {new_percent:.2f}%</p>"
+                f"<p><strong>임계값 {highest}%</strong>를 방금 초과했습니다.</p>"
+            )
+
+            await self.send_email_smtp(
+                sender_email=sender_email,
+                recipient_emails=[org.admin_email],
+                subject=subject,
+                body_text=body_text,
+                body_html=body_html,
+                org_id=org_id,
+            )
+            logger.info(f"📣 임계값 {highest}% 알림 발송 - 조직: {org_id}, 관리자: {org.admin_email}")
+
+        except Exception as e:
+            logger.error(f"❌ 임계값 알림 발송 실패 - 조직: {org_id}, 오류: {str(e)}")
             pass
     
     async def _check_daily_email_limit(

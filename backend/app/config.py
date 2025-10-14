@@ -110,12 +110,29 @@ class SaaSSettings(BaseSettings):
     AUTO_BACKUP_ENABLED: bool = True
     BACKUP_SCHEDULE_CRON: str = "0 2 * * *"  # 매일 새벽 2시
     
+    # DevOps 설정
+    DEVOPS_ENABLED: bool = True
+    DEVOPS_BACKUP_COMPRESSION: bool = True
+    DEVOPS_BACKUP_ENCRYPTION: bool = False
+    DEVOPS_TEST_TIMEOUT: int = 300  # 5분
+    DEVOPS_MAX_BACKUP_SIZE_GB: int = 50
+    DEVOPS_RESTORE_TIMEOUT: int = 1800  # 30분
+    
+    # 바이러스 검사 설정
+    VIRUS_SCAN_ENABLED: bool = True
+    CLAMAV_HOST: str = os.getenv("CLAMAV_HOST", "localhost")
+    CLAMAV_PORT: int = int(os.getenv("CLAMAV_PORT", "3310"))
+    VIRUS_SCAN_FALLBACK_ENABLED: bool = True  # ClamAV 사용 불가 시 휴리스틱 검사 사용
+    VIRUS_SCAN_MAX_FILE_SIZE_MB: int = 100  # 바이러스 검사 최대 파일 크기
+    VIRUS_QUARANTINE_DIR: str = os.getenv("VIRUS_QUARANTINE_DIR", "./quarantine")
+    VIRUS_SCAN_TIMEOUT_SECONDS: int = 30
+    
     # 모니터링 설정
     METRICS_ENABLED: bool = True
     HEALTH_CHECK_INTERVAL: int = 60
     ALERT_EMAIL: Optional[str] = os.getenv("ALERT_EMAIL")
     
-    # 외부 서비스 연동
+    # 외부 API 설정
     WEBHOOK_SECRET: Optional[str] = os.getenv("WEBHOOK_SECRET")
     API_RATE_LIMIT: int = 1000
     

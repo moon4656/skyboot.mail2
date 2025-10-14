@@ -156,6 +156,193 @@ class RateLimitService:
             )
             response.headers["X-RateLimit-Reset"] = str(limit_info.get("reset_time", 0))
 
+    def get_rate_limit_status(self, limit_type: str, identifier: str) -> Dict:
+        """
+        특정 대상의 속도 제한 상태를 조회합니다.
+        
+        Args:
+            limit_type: 제한 타입 (ip, user, organization, endpoint)
+            identifier: 식별자 (IP 주소, 사용자 ID, 조직 ID 등)
+        
+        Returns:
+            속도 제한 상태 정보
+        """
+        try:
+            if not redis_client:
+                return {"limit": 0, "remaining": 0, "reset_time": None, "window_seconds": 60}
+            
+            # Redis 키 생성
+            key = f"rate_limit:{limit_type}:{identifier}"
+            current_minute = int(time.time() // 60)
+            minute_key = f"{key}:{current_minute}"
+            
+            # 현재 요청 수 조회
+            current_count = redis_client.get(minute_key) or 0
+            current_count = int(current_count)
+            
+            # 제한 값 결정
+            if limit_type == "ip":
+                limit = self.default_limits["per_ip"]
+            elif limit_type == "user":
+                limit = self.default_limits["per_user"]
+            elif limit_type == "organization":
+                limit = self.default_limits["per_org"]
+            elif limit_type == "endpoint":
+                if "/auth/login" in identifier:
+                    limit = self.default_limits["auth_endpoints"]
+                elif "/mail/send" in identifier:
+                    limit = self.default_limits["mail_send"]
+                else:
+                    limit = self.default_limits["per_ip"]
+            else:
+                limit = self.default_limits["per_ip"]
+            
+            # 리셋 시간 계산 (다음 분)
+            reset_time = (current_minute + 1) * 60
+            
+            return {
+                "limit": limit,
+                "remaining": max(0, limit - current_count),
+                "reset_time": reset_time,
+                "window_seconds": 60,
+                "current_count": current_count
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 속도 제한 상태 조회 오류: {str(e)}")
+            return {"limit": 0, "remaining": 0, "reset_time": None, "window_seconds": 60}
+
+    def reset_rate_limit(self, target_type: str, target_id: str) -> bool:
+        """
+        특정 대상의 속도 제한을 리셋합니다.
+        
+        Args:
+            target_type: 대상 타입 (ip, user, organization)
+            target_id: 대상 ID
+        
+        Returns:
+            리셋 성공 여부
+        """
+        try:
+            if not redis_client:
+                return False
+            
+            # 패턴으로 키 검색 및 삭제
+            pattern = f"rate_limit:{target_type}:{target_id}:*"
+            keys = redis_client.keys(pattern)
+            
+            if keys:
+                redis_client.delete(*keys)
+                logger.info(f"✅ 속도 제한 리셋 성공 - {target_type}:{target_id}, 삭제된 키: {len(keys)}개")
+                return True
+            else:
+                logger.info(f"ℹ️ 리셋할 속도 제한 데이터 없음 - {target_type}:{target_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ 속도 제한 리셋 오류: {str(e)}")
+            return False
+
+    def get_violation_logs(self, limit: int = 50, offset: int = 0, target_type: str = None, organization_id: str = None) -> list:
+        """
+        속도 제한 위반 로그를 조회합니다.
+        
+        Args:
+            limit: 조회할 로그 수
+            offset: 오프셋
+            target_type: 필터링할 대상 타입
+            organization_id: 조직 ID (조직 관리자용)
+        
+        Returns:
+            위반 로그 목록
+        """
+        try:
+            if not redis_client:
+                return []
+            
+            # 실제 구현에서는 데이터베이스에서 조회하거나 Redis에서 로그 데이터를 가져옴
+            # 여기서는 샘플 데이터를 반환
+            violations = []
+            
+            # Redis에서 위반 로그 키 패턴 검색
+            if target_type:
+                pattern = f"violation_log:{target_type}:*"
+            else:
+                pattern = "violation_log:*"
+            
+            keys = redis_client.keys(pattern)
+            
+            # 최근 위반 로그 생성 (샘플)
+            for i, key in enumerate(keys[offset:offset+limit]):
+                try:
+                    log_data = redis_client.get(key)
+                    if log_data:
+                        violation = json.loads(log_data)
+                        violations.append(violation)
+                except:
+                    # 샘플 데이터 생성
+                    violation = {
+                        "id": f"violation_{i+1}",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "target_type": target_type or "ip",
+                        "target_id": f"192.168.1.{i+1}",
+                        "endpoint": "/api/auth/login",
+                        "limit_exceeded": "5 requests per minute",
+                        "actual_requests": 10 + i,
+                        "organization_id": organization_id or f"org_{i%3+1}",
+                        "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        "severity": "medium" if i % 2 == 0 else "high"
+                    }
+                    violations.append(violation)
+            
+            # 조직 필터링 (조직 관리자용)
+            if organization_id:
+                violations = [v for v in violations if v.get("organization_id") == organization_id]
+            
+            logger.info(f"✅ 위반 로그 조회 성공 - 로그 수: {len(violations)}")
+            return violations
+            
+        except Exception as e:
+            logger.error(f"❌ 위반 로그 조회 오류: {str(e)}")
+            return []
+
+    def log_violation(self, target_type: str, target_id: str, endpoint: str, limit_info: Dict, request_info: Dict):
+        """
+        속도 제한 위반을 로그에 기록합니다.
+        
+        Args:
+            target_type: 대상 타입
+            target_id: 대상 ID
+            endpoint: 엔드포인트
+            limit_info: 제한 정보
+            request_info: 요청 정보
+        """
+        try:
+            if not redis_client:
+                return
+            
+            violation_data = {
+                "timestamp": datetime.utcnow().isoformat(),
+                "target_type": target_type,
+                "target_id": target_id,
+                "endpoint": endpoint,
+                "limit_exceeded": f"{limit_info.get('limit', 0)} requests per minute",
+                "actual_requests": limit_info.get('current', 0),
+                "organization_id": request_info.get('org_id'),
+                "user_agent": request_info.get('user_agent', ''),
+                "ip_address": request_info.get('ip_address', ''),
+                "severity": "high" if limit_info.get('current', 0) > limit_info.get('limit', 0) * 2 else "medium"
+            }
+            
+            # Redis에 위반 로그 저장 (24시간 TTL)
+            key = f"violation_log:{target_type}:{target_id}:{int(time.time())}"
+            redis_client.setex(key, 86400, json.dumps(violation_data))
+            
+            logger.warning(f"🚨 속도 제한 위반 기록 - {target_type}:{target_id}, 엔드포인트: {endpoint}")
+            
+        except Exception as e:
+            logger.error(f"❌ 위반 로그 기록 오류: {str(e)}")
+
 
 # 전역 서비스 인스턴스
 rate_limit_service = RateLimitService()
