@@ -4,6 +4,7 @@ import Home from '@/views/Home.vue'
 import Login from '@/views/Login.vue'
 import Register from '@/views/Register.vue'
 import SendMail from '@/views/SendMail.vue'
+import Dashboard from '@/views/Dashboard.vue'
 
 /**
  * Vue Router 설정
@@ -33,6 +34,12 @@ const router = createRouter({
       path: '/send-mail',
       name: 'SendMail',
       component: SendMail,
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/dashboard',
+      name: 'Dashboard',
+      component: Dashboard,
       meta: { requiresAuth: true }
     }
   ]

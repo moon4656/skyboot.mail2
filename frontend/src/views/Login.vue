@@ -10,13 +10,13 @@
         <va-form @submit.prevent="handleLogin">
           <div class="mb-4">
             <va-input
-              v-model="form.email"
-              type="email"
-              label="이메일"
-              placeholder="이메일을 입력하세요"
-              :rules="emailRules"
-              :error="!!errors.email"
-              :error-messages="errors.email"
+              v-model="form.userId"
+              type="text"
+              label="사용자 ID"
+              placeholder="사용자 ID를 입력하세요"
+              :rules="userIdRules"
+              :error="!!errors.userId"
+              :error-messages="errors.userId"
               required
             />
           </div>
@@ -82,7 +82,7 @@ const userStore = useUserStore()
 
 // 폼 데이터
 const form = reactive({
-  email: '',
+  userId: '',
   password: ''
 })
 
@@ -91,15 +91,15 @@ const isLoading = ref(false)
 
 // 에러 상태
 const errors = reactive({
-  email: '',
+  userId: '',
   password: '',
   general: ''
 })
 
 // 유효성 검사 규칙
-const emailRules = [
-  (value: string) => !!value || '이메일을 입력해주세요.',
-  (value: string) => /.+@.+\..+/.test(value) || '올바른 이메일 형식을 입력해주세요.'
+const userIdRules = [
+  (value: string) => !!value || '사용자 ID를 입력해주세요.',
+  (value: string) => value.length >= 3 || '사용자 ID는 최소 3자 이상이어야 합니다.'
 ]
 
 const passwordRules = [
@@ -109,8 +109,8 @@ const passwordRules = [
 
 // 폼 유효성 검사
 const isFormValid = computed(() => {
-  return form.email && form.password && 
-         emailRules.every(rule => rule(form.email) === true) &&
+  return form.userId && form.password && 
+         userIdRules.every(rule => rule(form.userId) === true) &&
          passwordRules.every(rule => rule(form.password) === true)
 })
 
@@ -118,7 +118,7 @@ const isFormValid = computed(() => {
  * 에러 초기화 함수
  */
 const clearErrors = () => {
-  errors.email = ''
+  errors.userId = ''
   errors.password = ''
   errors.general = ''
 }
@@ -127,14 +127,14 @@ const clearErrors = () => {
  * 로그인 처리 함수
  */
 const handleLogin = async () => {
-  if (!isFormValid.value) return
+  // if (!isFormValid.value) return
   
   isLoading.value = true
   clearErrors()
   
   try {
     await userStore.login({
-      email: form.email,
+      username: form.userId,
       password: form.password
     })
     

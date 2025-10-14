@@ -881,6 +881,7 @@ async def get_inbox_mails(
         logger.info(f"📥 받은 메일함 조회 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
         
         # 메일 사용자 조회 (조직별 필터링)
+        logger.info(f"🔍 메일 사용자 조회 - current_user.user_uuid: {current_user.user_uuid}, org_id: {current_org_id}")
         mail_user = db.query(MailUser).filter(
             and_(
                 MailUser.user_uuid == current_user.user_uuid,
@@ -891,7 +892,10 @@ async def get_inbox_mails(
             logger.warning(f"⚠️ 메일 사용자 없음 - 조직: {current_org_id}, 사용자: {current_user.email}")
             raise HTTPException(status_code=404, detail="해당 조직에서 메일 사용자를 찾을 수 없습니다")
         
+        logger.info(f"✅ 메일 사용자 발견 - mail_user.user_uuid: {mail_user.user_uuid}, mail_user.org_id: {mail_user.org_id}")
+
         # 받은 메일함 폴더 조회
+        logger.info(f"🔍 받은 메일함 폴더 조회 - user_uuid: {mail_user.user_uuid}, org_id: {current_org_id}")
         inbox_folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.user_uuid == mail_user.user_uuid,
@@ -901,7 +905,17 @@ async def get_inbox_mails(
         ).first()
         
         if not inbox_folder:
+            # 디버깅을 위해 해당 사용자의 모든 폴더 조회
+            all_folders = db.query(MailFolder).filter(
+                and_(
+                    MailFolder.user_uuid == mail_user.user_uuid,
+                    MailFolder.org_id == current_org_id
+                )
+            ).all()
+            logger.error(f"❌ Inbox 폴더 없음 - 사용자의 모든 폴더: {[(f.name, f.folder_type, f.folder_uuid) for f in all_folders]}")
             raise HTTPException(status_code=404, detail="Inbox folder not found")
+        
+        logger.info(f"✅ Inbox 폴더 발견 - folder_uuid: {inbox_folder.folder_uuid}, name: {inbox_folder.name}")
         
         # 기본 쿼리 (조직별 필터링 포함)
         query = db.query(Mail).join(

@@ -64,7 +64,8 @@ async def login(
     
     try:
         # 사용자 인증
-        user = auth_service.authenticate_user(user_credentials.user_id, user_credentials.password, db)
+        auth_service = AuthService(db)
+        user = auth_service.authenticate_user(user_credentials.user_id, user_credentials.password)
         if not user:
             safe_log_login_attempt("failed", "invalid_credentials")
             raise HTTPException(
@@ -87,7 +88,7 @@ async def login(
             )
         
         # 일반 로그인 처리
-        tokens = auth_service.create_user_tokens(user, db)
+        tokens = auth_service.create_tokens(user)
         safe_log_login_attempt("success", user_uuid=str(user.user_uuid))
         
         logger.info(f"✅ 로그인 성공 - 사용자: {user.user_id}")
@@ -220,64 +221,7 @@ async def login_with_2fa(
         )
 
 
-@router.post("/register", response_model=UserResponse, summary="회원가입")
-async def register(
-    user_data: UserCreate,
-    request: Request,
-    db: Session = Depends(get_db)
-) -> UserResponse:
-    """
-    새로운 사용자를 등록합니다.
-    
-    - **user_id**: 사용자 ID (고유값)
-    - **email**: 이메일 주소
-    - **password**: 비밀번호
-    - **name**: 사용자 이름
-    - **org_id**: 조직 ID (선택사항)
-    """
-    logger.info(f"📝 회원가입 시도 - 사용자 ID: {user_data.user_id}, 이메일: {user_data.email}")
-    
-    try:
-        # 사용자 서비스 초기화
-        user_service = UserService(db)
-        
-        # 사용자 생성
-        new_user = user_service.create_user(user_data)
-        
-        logger.info(f"✅ 회원가입 성공 - 사용자: {new_user.user_id}, 이메일: {new_user.email}")
-        
-        # UserResponse 스키마에 맞게 응답 반환
-        return UserResponse(
-            id=new_user.id,
-            user_uuid=new_user.user_uuid,
-            user_id=new_user.user_id,
-            email=new_user.email,
-            name=new_user.name,
-            org_id=new_user.org_id,
-            role=new_user.role,
-            is_active=new_user.is_active,
-            is_2fa_enabled=new_user.is_2fa_enabled,
-            created_at=new_user.created_at,
-            updated_at=new_user.updated_at
-        )
-        
-    except ValueError as e:
-        # 사용자 생성 시 발생하는 검증 오류 (중복 사용자 등)
-        logger.warning(f"⚠️ 회원가입 검증 오류 - 사용자 ID: {user_data.user_id}, 오류: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    except HTTPException:
-        # HTTPException은 다시 발생시킴
-        raise
-    except Exception as e:
-        # 기타 예외 발생 시 로그 기록
-        logger.error(f"❌ 회원가입 시스템 오류 - 사용자 ID: {user_data.user_id}, 오류: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="회원가입 처리 중 오류가 발생했습니다"
-        )
+
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register(

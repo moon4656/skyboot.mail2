@@ -49,6 +49,96 @@ router = APIRouter(
 )
 
 
+@router.get("/dashboard-test", summary="대시보드 테스트 데이터")
+async def get_dashboard_test_data():
+    """
+    대시보드 테스트를 위한 모의 데이터를 반환합니다.
+    인증 없이 접근 가능한 테스트 엔드포인트입니다.
+    """
+    return {
+        "system_status": {
+            "status": "healthy",
+            "last_updated": datetime.now().isoformat(),
+            "services": {
+                "database": "healthy",
+                "mail_server": "healthy",
+                "redis": "warning",
+                "storage": "healthy"
+            }
+        },
+        "usage_stats": {
+            "emails_sent": {
+                "current": 1250,
+                "limit": 5000,
+                "percentage": 25
+            },
+            "storage_used": {
+                "current": 2.5,  # GB
+                "limit": 10.0,   # GB
+                "percentage": 25
+            },
+            "active_users": {
+                "current": 15,
+                "limit": 50,
+                "percentage": 30
+            },
+            "api_requests": {
+                "current": 8500,
+                "limit": 50000,
+                "percentage": 17
+            }
+        },
+        "mail_usage_chart": {
+            "labels": ["2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05", "2024-01-06", "2024-01-07"],
+            "data": [120, 150, 180, 200, 175, 220, 190],
+            "total_sent": 1235,
+            "daily_average": 176,
+            "max_daily": 220,
+            "trend_percentage": 12.5
+        },
+        "storage_usage": {
+            "used": 2.5,
+            "available": 7.5,
+            "total": 10.0,
+            "percentage": 25,
+            "breakdown": {
+                "emails": 1.8,
+                "attachments": 0.5,
+                "system": 0.2
+            }
+        },
+        "realtime_logs": [
+            {
+                "id": "log_001",
+                "action": "메일 발송",
+                "user": "user01@example.com",
+                "timestamp": datetime.now().isoformat(),
+                "ip_address": "192.168.1.100",
+                "organization": "테스트 조직",
+                "status": "success"
+            },
+            {
+                "id": "log_002", 
+                "action": "로그인",
+                "user": "admin@example.com",
+                "timestamp": datetime.now().isoformat(),
+                "ip_address": "192.168.1.101",
+                "organization": "테스트 조직",
+                "status": "success"
+            },
+            {
+                "id": "log_003",
+                "action": "메일 수신",
+                "user": "user02@example.com", 
+                "timestamp": datetime.now().isoformat(),
+                "ip_address": "192.168.1.102",
+                "organization": "테스트 조직",
+                "status": "success"
+            }
+        ]
+    }
+
+
 @router.get(
     "/context",
     summary="컨텍스트 디버그 정보",

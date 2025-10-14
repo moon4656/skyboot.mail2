@@ -74,7 +74,7 @@ export const useUserStore = defineStore('user', () => {
   /**
    * 로그인 함수
    */
-  const login = async (credentials: { email: string; password: string }) => {
+  const login = async (credentials: { username: string; password: string }) => {
     try {
       const response = await apiClient.post<LoginResponse>('/auth/login', credentials)
       const { access_token, refresh_token } = response.data

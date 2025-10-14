@@ -21,6 +21,16 @@
         </va-navbar-item>
         
         <va-navbar-item v-else>
+          <router-link to="/dashboard" class="text-white text-decoration-none mr-3">
+            <va-button preset="secondary" size="small" icon="dashboard">
+              대시보드
+            </va-button>
+          </router-link>
+          <router-link to="/send-mail" class="text-white text-decoration-none mr-3">
+            <va-button preset="secondary" size="small" icon="send">
+              메일 발송
+            </va-button>
+          </router-link>
           <span class="text-white mr-3">{{ userStore.user?.username }}님</span>
           <va-button @click="logout" color="danger" size="small">
             로그아웃

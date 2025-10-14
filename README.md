@@ -292,8 +292,6 @@ curl -X PUT "http://localhost:8000/api/v1/organizations/{org_id}/settings" \
 - SQL 인젝션 방지 (SQLAlchemy ORM)
 - 환경 변수를 통한 민감한 정보 관리
 
-
-
 # postfix restart
 sudo systemctl restart postfix
 
