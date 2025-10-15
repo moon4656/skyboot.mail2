@@ -4,7 +4,7 @@ import { useUserStore } from '@/stores/user'
 /**
  * API 기본 URL 설정
  */
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api'
+const API_BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
 
 /**
  * Axios 인스턴스 생성
@@ -84,7 +84,17 @@ export const mailApi = {
    * 메일 발송
    */
   sendMail: (data: { to_email: string; subject: string; body: string }) => {
-    return apiClient.post('/mail/send', data)
+    // 백엔드 Form 방식에 맞게 필드명 변경
+    const formData = new FormData()
+    formData.append('to_emails', data.to_email)
+    formData.append('subject', data.subject)
+    formData.append('content', data.body)
+    
+    return apiClient.post('/mail/send', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
   },
   
   /**
@@ -109,15 +119,19 @@ export const authApi = {
   /**
    * 회원가입
    */
-  register: (data: { email: string; username: string; password: string }) => {
+  register: (data: { user_id: string; username: string; password: string }) => {
     return apiClient.post('/auth/register', data)
   },
   
   /**
    * 로그인
    */
-  login: (data: { email: string; password: string }) => {
-    return apiClient.post('/auth/login', data)
+  login: (data: { user_id: string; password: string }) => {
+    // 백엔드 스키마에 맞게 email을 user_id로 변경
+    return apiClient.post('/auth/login', {
+      user_id: data.user_id,
+      password: data.password
+    })
   },
   
   /**

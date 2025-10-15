@@ -533,6 +533,58 @@ async def send_mail(
                 else:
                     logger.warning(f"⚠️ 발신자 보낸편지함을 찾을 수 없음 - 조직: {current_org_id}, 사용자: {mail_user.user_uuid}")
                 
+                # 수신자들의 받은편지함에 메일 추가 (임시보관함이 아닌 경우에만)
+                logger.info(f"📥 수신자 받은편지함에 메일 추가 시작 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
+                for recipient in recipients:
+                    try:
+                        # 수신자의 메일 사용자 정보 조회
+                        recipient_mail_user = db.query(MailUser).filter(
+                            and_(
+                                MailUser.email == recipient.recipient_email,
+                                MailUser.org_id == current_org_id
+                            )
+                        ).first()
+                        
+                        if recipient_mail_user:
+                            # 수신자의 받은편지함 폴더 조회
+                            inbox_folder = db.query(MailFolder).filter(
+                                and_(
+                                    MailFolder.user_uuid == recipient_mail_user.user_uuid,
+                                    MailFolder.org_id == current_org_id,
+                                    MailFolder.folder_type == FolderType.INBOX
+                                )
+                            ).first()
+                            
+                            if inbox_folder:
+                                # 이미 할당되어 있는지 확인
+                                existing_inbox_relation = db.query(MailInFolder).filter(
+                                    and_(
+                                        MailInFolder.mail_uuid == mail.mail_uuid,
+                                        MailInFolder.folder_uuid == inbox_folder.folder_uuid,
+                                        MailInFolder.user_uuid == recipient_mail_user.user_uuid
+                                    )
+                                ).first()
+                                
+                                if not existing_inbox_relation:
+                                    # 수신자의 받은편지함에 메일 할당
+                                    recipient_mail_in_folder = MailInFolder(
+                                        mail_uuid=mail.mail_uuid,
+                                        folder_uuid=inbox_folder.folder_uuid,
+                                        user_uuid=recipient_mail_user.user_uuid,
+                                        is_read=False  # 새 메일은 읽지 않음 상태
+                                    )
+                                    db.add(recipient_mail_in_folder)
+                                    logger.info(f"📥 메일을 수신자 받은편지함에 할당 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자: {recipient.recipient_email}")
+                                else:
+                                    logger.debug(f"📥 메일이 이미 수신자 받은편지함에 할당됨 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자: {recipient.recipient_email}")
+                            else:
+                                logger.warning(f"⚠️ 수신자 받은편지함을 찾을 수 없음 - 조직: {current_org_id}, 수신자: {recipient.recipient_email}")
+                        else:
+                            logger.warning(f"⚠️ 수신자 메일 사용자를 찾을 수 없음 - 조직: {current_org_id}, 수신자: {recipient.recipient_email}")
+                    except Exception as recipient_error:
+                        logger.error(f"❌ 수신자 받은편지함 할당 중 오류 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자: {recipient.recipient_email}, 오류: {str(recipient_error)}")
+                        # 개별 수신자 할당 실패는 전체 메일 발송 실패로 처리하지 않음
+                
         except Exception as folder_error:
             logger.error(f"❌ 폴더 할당 중 오류 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(folder_error)}")
             # 폴더 할당 실패는 메일 발송 실패로 처리하지 않음
@@ -838,6 +890,55 @@ async def send_mail_json(
                         logger.debug(f"📁 메일이 이미 보낸편지함에 할당됨 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}")
                 else:
                     logger.warning(f"⚠️ 발신자 보낸편지함을 찾을 수 없음 (JSON) - 조직: {current_org_id}, 사용자: {mail_user.user_uuid}")
+                
+                # 수신자의 받은편지함에 메일 추가 (JSON)
+                for recipient in recipients:
+                    try:
+                        # 수신자의 MailUser 정보 조회
+                        recipient_mail_user = db.query(MailUser).filter(
+                            and_(
+                                MailUser.email == recipient.recipient_email,
+                                MailUser.organization_id == current_org_id
+                            )
+                        ).first()
+                        
+                        if recipient_mail_user:
+                            # 수신자의 받은편지함 폴더 조회
+                            inbox_folder = db.query(MailFolder).filter(
+                                and_(
+                                    MailFolder.user_uuid == recipient_mail_user.user_uuid,
+                                    MailFolder.folder_type == FolderType.INBOX
+                                )
+                            ).first()
+                            
+                            if inbox_folder:
+                                # 이미 할당되어 있는지 확인
+                                existing_inbox_relation = db.query(MailInFolder).filter(
+                                    and_(
+                                        MailInFolder.mail_uuid == mail.mail_uuid,
+                                        MailInFolder.folder_uuid == inbox_folder.folder_uuid
+                                    )
+                                ).first()
+                                
+                                if not existing_inbox_relation:
+                                    # 수신자의 받은편지함에 메일 할당
+                                    mail_in_inbox = MailInFolder(
+                                        mail_uuid=mail.mail_uuid,
+                                        folder_uuid=inbox_folder.folder_uuid,
+                                        user_uuid=recipient_mail_user.user_uuid
+                                    )
+                                    db.add(mail_in_inbox)
+                                    db.commit()
+                                    logger.info(f"📥 메일을 수신자 받은편지함에 할당 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자: {recipient.recipient_email}")
+                                else:
+                                    logger.debug(f"📥 메일이 이미 수신자 받은편지함에 할당됨 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자: {recipient.recipient_email}")
+                            else:
+                                logger.warning(f"⚠️ 수신자 받은편지함을 찾을 수 없음 (JSON) - 조직: {current_org_id}, 수신자: {recipient.recipient_email}")
+                        else:
+                            logger.warning(f"⚠️ 수신자 MailUser를 찾을 수 없음 (JSON) - 조직: {current_org_id}, 수신자: {recipient.recipient_email}")
+                    except Exception as recipient_folder_error:
+                        logger.error(f"❌ 수신자 받은편지함 할당 중 오류 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자: {recipient.recipient_email}, 오류: {str(recipient_folder_error)}")
+                        # 수신자 폴더 할당 실패는 메일 발송 실패로 처리하지 않음
                     
             except Exception as folder_error:
                 logger.error(f"❌ 폴더 할당 중 오류 (JSON) - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(folder_error)}")

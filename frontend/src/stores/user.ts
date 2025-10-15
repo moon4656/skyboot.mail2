@@ -76,7 +76,13 @@ export const useUserStore = defineStore('user', () => {
    */
   const login = async (credentials: { username: string; password: string }) => {
     try {
-      const response = await apiClient.post<LoginResponse>('/auth/login', credentials)
+      // 백엔드 API는 user_id 필드를 기대하므로 username을 user_id로 변환
+      const loginData = {
+        user_id: credentials.username,
+        password: credentials.password
+      }
+      
+      const response = await apiClient.post<LoginResponse>('/auth/login', loginData)
       const { access_token, refresh_token } = response.data
       
       setTokens(access_token, refresh_token)

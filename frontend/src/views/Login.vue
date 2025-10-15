@@ -30,6 +30,7 @@
               :rules="passwordRules"
               :error="!!errors.password"
               :error-messages="errors.password"
+              autocomplete="current-password"
               required
             />
           </div>

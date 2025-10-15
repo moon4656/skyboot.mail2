@@ -1978,3 +1978,155 @@ async def process_scheduled_mails(
     except Exception as e:
         logger.error(f"❌ 예약 메일 발송 처리 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
         return ScheduleDispatchResponse(success=False, message=f"예약 메일 발송 처리 실패: {str(e)}", processed_count=0)
+
+
+@router.get("/logs", summary="메일 로그 조회")
+async def get_mail_logs(
+    page: int = Query(1, ge=1, description="페이지 번호"),
+    limit: int = Query(20, ge=1, le=100, description="페이지당 항목 수"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+):
+    """
+    사용자의 메일 로그를 조회합니다.
+    
+    Args:
+        page: 페이지 번호 (기본값: 1)
+        limit: 페이지당 항목 수 (기본값: 20, 최대: 100)
+        current_user: 현재 사용자
+        db: 데이터베이스 세션
+        current_org_id: 현재 조직 ID
+    
+    Returns:
+        메일 로그 목록과 페이지네이션 정보
+    """
+    try:
+        logger.info(f"📊 메일 로그 조회 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 페이지: {page}")
+        
+        # 오프셋 계산
+        offset = (page - 1) * limit
+        
+        # 메일 로그 조회 (조직별 필터링)
+        logs_query = db.query(MailLog).filter(
+            MailLog.org_id == current_org_id,
+            MailLog.user_id == current_user.id
+        ).order_by(desc(MailLog.created_at))
+        
+        # 전체 개수 조회
+        total_count = logs_query.count()
+        
+        # 페이지네이션 적용
+        logs = logs_query.offset(offset).limit(limit).all()
+        
+        # 응답 데이터 구성
+        log_items = []
+        for log in logs:
+            log_items.append({
+                "id": log.id,
+                "mail_id": log.mail_id,
+                "action": log.action,
+                "details": log.details,
+                "ip_address": log.ip_address,
+                "user_agent": log.user_agent,
+                "created_at": log.created_at.isoformat() if log.created_at else None
+            })
+        
+        # 페이지네이션 정보
+        total_pages = (total_count + limit - 1) // limit
+        
+        response_data = {
+            "success": True,
+            "data": {
+                "logs": log_items,
+                "pagination": {
+                    "current_page": page,
+                    "total_pages": total_pages,
+                    "total_count": total_count,
+                    "page_size": limit,
+                    "has_next": page < total_pages,
+                    "has_prev": page > 1
+                }
+            },
+            "message": "메일 로그 조회 성공"
+        }
+        
+        logger.info(f"✅ 메일 로그 조회 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 로그 수: {len(log_items)}")
+        return JSONResponse(content=response_data)
+        
+    except Exception as e:
+        logger.error(f"❌ 메일 로그 조회 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 에러: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"메일 로그 조회 실패: {str(e)}"
+        )
+
+
+@router.get("/logs/{mail_id}", summary="특정 메일 로그 조회")
+async def get_mail_log(
+    mail_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    current_org_id: str = Depends(get_current_org_id)
+):
+    """
+    특정 메일의 로그를 조회합니다.
+    
+    Args:
+        mail_id: 메일 ID
+        current_user: 현재 사용자
+        db: 데이터베이스 세션
+        current_org_id: 현재 조직 ID
+    
+    Returns:
+        특정 메일의 로그 정보
+    """
+    try:
+        logger.info(f"📊 특정 메일 로그 조회 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}")
+        
+        # 메일 로그 조회 (조직별 필터링)
+        logs = db.query(MailLog).filter(
+            MailLog.org_id == current_org_id,
+            MailLog.user_id == current_user.id,
+            MailLog.mail_id == mail_id
+        ).order_by(desc(MailLog.created_at)).all()
+        
+        if not logs:
+            raise HTTPException(
+                status_code=404,
+                detail="해당 메일의 로그를 찾을 수 없습니다."
+            )
+        
+        # 응답 데이터 구성
+        log_items = []
+        for log in logs:
+            log_items.append({
+                "id": log.id,
+                "mail_id": log.mail_id,
+                "action": log.action,
+                "details": log.details,
+                "ip_address": log.ip_address,
+                "user_agent": log.user_agent,
+                "created_at": log.created_at.isoformat() if log.created_at else None
+            })
+        
+        response_data = {
+            "success": True,
+            "data": {
+                "mail_id": mail_id,
+                "logs": log_items
+            },
+            "message": "메일 로그 조회 성공"
+        }
+        
+        logger.info(f"✅ 특정 메일 로그 조회 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 로그 수: {len(log_items)}")
+        return JSONResponse(content=response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 특정 메일 로그 조회 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일ID: {mail_id}, 에러: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"메일 로그 조회 실패: {str(e)}"
+        )
