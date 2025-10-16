@@ -99,6 +99,7 @@
 import { computed } from 'vue'
 import { useUserStore } from '@/stores/user'
 
+
 /**
  * 홈 페이지 컴포넌트
  * 애플리케이션의 메인 랜딩 페이지
