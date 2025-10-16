@@ -54,6 +54,7 @@ class Organization(Base):
     users = relationship("User", back_populates="organization")
     mail_users = relationship("MailUser", back_populates="organization")
     mails = relationship("Mail", back_populates="organization")
+    mail_logs = relationship("MailLog", back_populates="organization")
     settings = relationship("OrganizationSettings", back_populates="organization")
     usage = relationship("OrganizationUsage", back_populates="organization", uselist=False)
     

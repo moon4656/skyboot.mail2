@@ -138,30 +138,30 @@ async def rate_limit_middleware_wrapper(request: Request, call_next):
 logger.info("🚦 속도 제한 미들웨어 활성화 완료 (Redis 연결 성공)")
 
 # 요청 로깅 미들웨어 (성능 테스트를 위해 임시 비활성화)
-# @app.middleware("http")
-# async def log_requests(request: Request, call_next):
-#     """요청 로깅 미들웨어"""
-#     start_time = time.time()
-#     
-#     # 요청 정보 로깅
-#     logger.info(f"📥 {request.method} {request.url.path} - IP: {request.client.host}")
-#     
-#     try:
-#         response = await call_next(request)
-#         process_time = time.time() - start_time
-#         
-#         # 응답 정보 로깅
-#         logger.info(f"📤 {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.3f}s")
-#         
-#         # 응답 헤더에 처리 시간 추가
-#         response.headers["X-Process-Time"] = str(process_time)
-#         
-#         return response
-#         
-#     except Exception as e:
-#         process_time = time.time() - start_time
-#         logger.error(f"❌ {request.method} {request.url.path} - Error: {str(e)} - Time: {process_time:.3f}s")
-#         raise
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """요청 로깅 미들웨어"""
+    start_time = time.time()
+    
+    # 요청 정보 로깅
+    logger.info(f"📥 {request.method} {request.url.path} - IP: {request.client.host}")
+    
+    try:
+        response = await call_next(request)
+        process_time = time.time() - start_time
+        
+        # 응답 정보 로깅
+        logger.info(f"📤 {request.method} {request.url.path} - Status: {response.status_code} - Time: {process_time:.3f}s")
+        
+        # 응답 헤더에 처리 시간 추가
+        response.headers["X-Process-Time"] = str(process_time)
+        
+        return response
+        
+    except Exception as e:
+        process_time = time.time() - start_time
+        logger.error(f"❌ {request.method} {request.url.path} - Error: {str(e)} - Time: {process_time:.3f}s")
+        raise
 
 # 전역 예외 처리기
 @app.exception_handler(HTTPException)
@@ -232,7 +232,7 @@ async def general_exception_handler(request: Request, exc: Exception):
         }
     )
 
-# API 라우터 등록 (v1 API)
+# API 라우터 등록 (v1 API) - 기존 엔드포인트 유지
 api_prefix = settings.API_V1_PREFIX
 
 app.include_router(auth_router, prefix=f"{api_prefix}/auth", tags=["인증"]) 
@@ -261,7 +261,162 @@ if settings.is_development():
     app.include_router(debug_router, prefix=f"{api_prefix}", tags=["디버그"])
     logger.info("🔍 디버그 라우터 등록 완료 (개발 환경)")
 
-logger.info("📡 API 라우터 등록 완료")
+logger.info("📡 기존 API 라우터 등록 완료")
+
+# ========================================
+# 도메인별 FastAPI 앱 인스턴스 생성 (별도 Swagger 문서 제공)
+# ========================================
+
+# 1. Admin Domain App - 관리자 기능
+admin_app = FastAPI(
+    title="SkyBoot Mail - Admin API",
+    description="관리자 전용 API 문서 - 조직 관리, 사용자 관리, 시스템 설정",
+    version=settings.APP_VERSION,
+    docs_url="/",
+    redoc_url="/redoc"
+)
+
+# Admin 도메인 라우터 등록
+admin_app.include_router(organization_router, prefix="/organizations", tags=["조직 관리"])
+admin_app.include_router(user_router, prefix="/users", tags=["사용자 관리"])
+admin_app.include_router(mail_advanced_router, prefix="/mail", tags=["메일 고급"])
+admin_app.include_router(mail_setup_router, prefix="/mail", tags=["메일 설정"])
+admin_app.include_router(monitoring_router, prefix="/monitoring", tags=["모니터링"])
+admin_app.include_router(devops_router, prefix="/devops", tags=["DevOps"])
+logger.info("👑 Admin Domain 앱 생성 및 라우터 등록 완료")
+
+# 2. User Domain App - 사용자 기능
+user_app = FastAPI(
+    title="SkyBoot Mail - User API",
+    description="사용자 전용 API 문서 - 메일 기능, 프로필 관리, PWA",
+    version=settings.APP_VERSION,
+    docs_url="/",
+    redoc_url="/redoc"
+)
+
+# User 도메인 라우터 등록
+user_app.include_router(auth_router, prefix="/auth", tags=["인증"])
+user_app.include_router(user_router, prefix="/profile", tags=["프로필"])
+user_app.include_router(mail_core_router, prefix="/mail", tags=["메일 핵심"])
+user_app.include_router(mail_convenience_router, prefix="/mail", tags=["메일 편의"])
+user_app.include_router(addressbook_router, prefix="/addressbook", tags=["주소록"])
+user_app.include_router(pwa_router, prefix="/pwa", tags=["PWA"])
+user_app.include_router(offline_router, prefix="/offline", tags=["오프라인"])
+user_app.include_router(push_notification_router, prefix="/notifications", tags=["푸시 알림"])
+logger.info("👤 User Domain 앱 생성 및 라우터 등록 완료")
+
+# 3. Mail Domain App - 메일 기능
+mail_app = FastAPI(
+    title="SkyBoot Mail - Mail API",
+    description="메일 전용 API 문서 - 메일 발송/수신, 폴더 관리, 고급 기능",
+    version=settings.APP_VERSION,
+    docs_url="/",
+    redoc_url="/redoc"
+)
+
+# Mail 도메인 라우터 등록
+mail_app.include_router(mail_core_router, prefix="/core", tags=["메일 핵심"])
+mail_app.include_router(mail_convenience_router, prefix="/convenience", tags=["메일 편의"])
+mail_app.include_router(mail_advanced_router, prefix="/advanced", tags=["메일 고급"])
+mail_app.include_router(mail_setup_router, prefix="/setup", tags=["메일 설정"])
+logger.info("📧 Mail Domain 앱 생성 및 라우터 등록 완료")
+
+# 4. Business Domain App - 핵심 업무 기능
+business_app = FastAPI(
+    title="SkyBoot Mail - Business API",
+    description="핵심 업무 API 문서 - 인증, 메일, 주소록",
+    version=settings.APP_VERSION,
+    docs_url="/",
+    redoc_url="/redoc"
+)
+
+# Business 도메인 라우터 등록
+business_app.include_router(auth_router, prefix="/auth", tags=["인증"])
+business_app.include_router(mail_core_router, prefix="/mail", tags=["메일 핵심"])
+business_app.include_router(mail_convenience_router, prefix="/mail", tags=["메일 편의"])
+business_app.include_router(addressbook_router, prefix="/addressbook", tags=["주소록"])
+logger.info("🏢 Business Domain 앱 생성 및 라우터 등록 완료")
+
+# 5. System Domain App - 시스템 관리 기능
+system_app = FastAPI(
+    title="SkyBoot Mail - System API",
+    description="시스템 관리 API 문서 - 국제화, 테마, 모니터링, 디버그",
+    version=settings.APP_VERSION,
+    docs_url="/",
+    redoc_url="/redoc"
+)
+
+# System 도메인 라우터 등록
+system_app.include_router(i18n_router, prefix="/i18n", tags=["국제화"])
+system_app.include_router(theme_router, prefix="/theme", tags=["조직 테마"])
+system_app.include_router(monitoring_router, prefix="/monitoring", tags=["시스템 모니터링"])
+if settings.is_development():
+    system_app.include_router(debug_router, prefix="/debug", tags=["디버그"])
+logger.info("⚙️ System Domain 앱 생성 및 라우터 등록 완료")
+
+# 메인 앱에 도메인별 앱들을 서브 앱으로 마운트
+app.mount("/docs/admin", admin_app)
+app.mount("/docs/user", user_app)
+app.mount("/docs/mail", mail_app)
+app.mount("/docs/business", business_app)
+app.mount("/docs/system", system_app)
+
+logger.info("🎯 모든 도메인별 앱 마운트 완료")
+logger.info("📚 도메인별 Swagger 문서 접근 경로:")
+logger.info("   - Admin: http://localhost:8000/docs/admin")
+logger.info("   - User: http://localhost:8000/docs/user")
+logger.info("   - Mail: http://localhost:8000/docs/mail")
+logger.info("   - Business: http://localhost:8000/docs/business")
+logger.info("   - System: http://localhost:8000/docs/system")
+
+# ========================================
+# 기존 도메인별 엔드포인트 그룹 (하위 호환성 유지)
+# ========================================
+
+# 1. Business Domain - 핵심 업무 기능
+# Business Domain ( /api/v1/business/
+logger.info("🏢 Business Domain 엔드포인트 등록 시작")
+app.include_router(auth_router, prefix=f"{api_prefix}/business/auth", tags=["Business - 인증"])
+app.include_router(mail_core_router, prefix=f"{api_prefix}/business/mail", tags=["Business - 메일 핵심"])
+app.include_router(mail_convenience_router, prefix=f"{api_prefix}/business/mail", tags=["Business - 메일 편의"])
+app.include_router(addressbook_router, prefix=f"{api_prefix}/business/addressbook", tags=["Business - 주소록"])
+logger.info("✅ Business Domain 엔드포인트 등록 완료")
+
+# 2. Admin Domain - 관리자 기능
+# Admin Domain ( /api/v1/admin/
+logger.info("👑 Admin Domain 엔드포인트 등록 시작")
+app.include_router(organization_router, prefix=f"{api_prefix}/admin/organizations", tags=["Admin - 조직 관리"])
+app.include_router(user_router, prefix=f"{api_prefix}/admin/users", tags=["Admin - 사용자 관리"])
+app.include_router(mail_advanced_router, prefix=f"{api_prefix}/admin/mail", tags=["Admin - 메일 고급"])
+app.include_router(mail_setup_router, prefix=f"{api_prefix}/admin/mail", tags=["Admin - 메일 설정"])
+app.include_router(monitoring_router, prefix=f"{api_prefix}/admin/monitoring", tags=["Admin - 모니터링"])
+app.include_router(devops_router, prefix=f"{api_prefix}/admin/devops", tags=["Admin - DevOps"])
+logger.info("✅ Admin Domain 엔드포인트 등록 완료")
+
+# 3. System Domain - 시스템 관리 기능
+# System Domain ( /api/v1/system/
+logger.info("⚙️ System Domain 엔드포인트 등록 시작")
+app.include_router(i18n_router, prefix=f"{api_prefix}/system/i18n", tags=["System - 국제화"])
+app.include_router(theme_router, prefix=f"{api_prefix}/system/theme", tags=["System - 조직 테마"])
+app.include_router(monitoring_router, prefix=f"{api_prefix}/system/monitoring", tags=["System - 시스템 모니터링"])
+if settings.is_development():
+    app.include_router(debug_router, prefix=f"{api_prefix}/system/debug", tags=["System - 디버그"])
+logger.info("✅ System Domain 엔드포인트 등록 완료")
+
+# 4. User Domain - 사용자 중심 기능
+# User Domain ( /api/v1/user/
+logger.info("👤 User Domain 엔드포인트 등록 시작")
+app.include_router(auth_router, prefix=f"{api_prefix}/user/auth", tags=["User - 인증"])
+app.include_router(user_router, prefix=f"{api_prefix}/user/profile", tags=["User - 프로필"])
+app.include_router(mail_core_router, prefix=f"{api_prefix}/user/mail", tags=["User - 메일 핵심"])
+app.include_router(mail_convenience_router, prefix=f"{api_prefix}/user/mail", tags=["User - 메일 편의"])
+app.include_router(addressbook_router, prefix=f"{api_prefix}/user/addressbook", tags=["User - 주소록"])
+app.include_router(pwa_router, prefix=f"{api_prefix}/user/pwa", tags=["User - PWA"])
+app.include_router(offline_router, prefix=f"{api_prefix}/user/offline", tags=["User - 오프라인"])
+app.include_router(push_notification_router, prefix=f"{api_prefix}/user/notifications", tags=["User - 푸시 알림"])
+logger.info("✅ User Domain 엔드포인트 등록 완료")
+
+logger.info("🎯 모든 도메인별 엔드포인트 등록 완료")
 
 @app.get("/", summary="API 루트", description="SkyBoot Mail SaaS API 기본 정보")
 async def root():
@@ -281,7 +436,63 @@ async def root():
             "분석 및 통계",
             "조직별 데이터 격리"
         ],
-        "api_docs": "/docs" if settings.is_development() else "문서는 개발 환경에서만 제공됩니다",
+        "api_endpoints": {
+            "legacy": {
+                "description": "기존 엔드포인트 (하위 호환성 유지)",
+                "base_url": f"{settings.API_V1_PREFIX}",
+                "examples": [
+                    f"{settings.API_V1_PREFIX}/auth",
+                    f"{settings.API_V1_PREFIX}/mail",
+                    f"{settings.API_V1_PREFIX}/users"
+                ]
+            },
+            "business": {
+                "description": "핵심 업무 기능 (인증, 메일, 주소록)",
+                "base_url": f"{settings.API_V1_PREFIX}/business",
+                "examples": [
+                    f"{settings.API_V1_PREFIX}/business/auth",
+                    f"{settings.API_V1_PREFIX}/business/mail",
+                    f"{settings.API_V1_PREFIX}/business/addressbook"
+                ]
+            },
+            "admin": {
+                "description": "관리자 기능 (조직, 사용자, 고급 설정)",
+                "base_url": f"{settings.API_V1_PREFIX}/admin",
+                "examples": [
+                    f"{settings.API_V1_PREFIX}/admin/organizations",
+                    f"{settings.API_V1_PREFIX}/admin/users",
+                    f"{settings.API_V1_PREFIX}/admin/monitoring"
+                ]
+            },
+            "system": {
+                "description": "시스템 관리 기능 (국제화, 테마, 모니터링)",
+                "base_url": f"{settings.API_V1_PREFIX}/system",
+                "examples": [
+                    f"{settings.API_V1_PREFIX}/system/i18n",
+                    f"{settings.API_V1_PREFIX}/system/theme",
+                    f"{settings.API_V1_PREFIX}/system/monitoring"
+                ]
+            },
+            "user": {
+                "description": "사용자 중심 기능 (프로필, 메일, PWA)",
+                "base_url": f"{settings.API_V1_PREFIX}/user",
+                "examples": [
+                    f"{settings.API_V1_PREFIX}/user/auth",
+                    f"{settings.API_V1_PREFIX}/user/mail",
+                    f"{settings.API_V1_PREFIX}/user/profile"
+                ]
+            }
+        },
+        "api_docs": {
+            "main": "/docs" if settings.is_development() else "문서는 개발 환경에서만 제공됩니다",
+            "domain_specific": {
+                "admin": "/docs/admin",
+                "user": "/docs/user", 
+                "mail": "/docs/mail",
+                "business": "/docs/business",
+                "system": "/docs/system"
+            }
+        },
         "contact": {
             "name": "SkyBoot Mail 개발팀",
             "email": "support@skyboot.mail"

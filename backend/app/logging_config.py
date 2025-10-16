@@ -29,14 +29,24 @@ def setup_logging():
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     
-    # 콘솔 핸들러만 사용 (성능 최적화)
+    # 콘솔 핸들러
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
     
-    # 간단한 로그 초기화 메시지
-    logger.info("📝 간소화된 로깅 시스템이 초기화되었습니다.")
+    # 파일 핸들러 추가 (일별 로테이션)
+    today = datetime.now().strftime('%Y-%m-%d')
+    log_file = log_dir / f"app.log.{today}"
+    
+    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler.setLevel(logging.DEBUG)
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    # 로그 초기화 메시지
+    logger.info("📝 로깅 시스템이 초기화되었습니다.")
+    logger.info(f"📁 로그 파일: {log_file}")
     
     return logger
 

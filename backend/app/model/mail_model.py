@@ -185,6 +185,7 @@ class MailLog(Base):
     id = Column(BigInteger, primary_key=True, index=True)
     mail_uuid = Column(String(50), ForeignKey("mails.mail_uuid"), nullable=False, comment="메일 UUID (mails.mail_uuid 참조)")
     user_uuid = Column(String(36), ForeignKey("mail_users.user_uuid"), comment="사용자 UUID")
+    org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="조직 ID")
     action = Column(String(50), nullable=False, comment="수행된 작업")
     details = Column(Text, comment="상세 내용")
     ip_address = Column(String(45), comment="IP 주소")
@@ -194,3 +195,4 @@ class MailLog(Base):
     # 관계 설정
     mail = relationship("Mail", back_populates="logs")
     user = relationship("MailUser", back_populates="mail_logs")
+    organization = relationship("Organization", back_populates="mail_logs")

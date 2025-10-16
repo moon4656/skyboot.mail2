@@ -37,7 +37,7 @@ class UserResponse(BaseModel):
             "example": {
                 "user_id": "user01",
                 "username": "이성용",
-                "email": "moon4656@gmail.com",
+                "email": "user01@example.com",
                 "org_id": "3856a8c1-84a4-4019-9133-655cacab4bc9",
                 "user_uuid": "3b959219-da10-42bb-9693-0aa3ed502cd3",
                 "role": "user",

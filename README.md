@@ -186,10 +186,29 @@ python test_mail.py
 ### API 테스트
 
 FastAPI 자동 생성 문서를 통해 API를 테스트할 수 있습니다:
+
+#### 통합 API 문서
 - http://localhost:8000/docs (Swagger UI)
 - http://localhost:8000/redoc (ReDoc)
 
+#### 도메인별 API 문서
+- http://localhost:8000/docs - 통합 API 문서
+- http://localhost:8000/docs/admin - 관리자 도메인 API 문서
+- http://localhost:8000/docs/user - 사용자 도메인 API 문서
+- http://localhost:8000/docs/mail - 메일 도메인 API 문서
+- http://localhost:8000/docs/business - 비즈니스 도메인 API 문서
+- http://localhost:8000/docs/system - 시스템 도메인 API 문서
+
 ## 📊 API 엔드포인트
+
+### 🏗️ 도메인별 엔드포인트 구조
+
+SkyBoot Mail은 비즈니스 도메인별로 체계적으로 분류된 API 엔드포인트를 제공합니다:
+
+- 🏢 **Business Domain** (`/api/v1/business/`): 비즈니스 로직 관련 엔드포인트
+- 👑 **Admin Domain** (`/api/v1/admin/`): 관리자 기능 관련 엔드포인트  
+- ⚙️ **System Domain** (`/api/v1/system/`): 시스템 관리 관련 엔드포인트
+- 👤 **User Domain** (`/api/v1/user/`): 사용자 기능 관련 엔드포인트
 
 ### 인증
 - `POST /api/auth/register` - 사용자 등록
