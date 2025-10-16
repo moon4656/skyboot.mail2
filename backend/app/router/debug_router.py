@@ -111,7 +111,7 @@ async def get_dashboard_test_data():
             {
                 "id": "log_001",
                 "action": "메일 발송",
-                "user": "user01@example.com",
+                "user": "moon4656@gmail.com",
                 "timestamp": datetime.now().isoformat(),
                 "ip_address": "192.168.1.100",
                 "organization": "테스트 조직",

@@ -1,0 +1,8 @@
+2025/10/16 13:40:24 socat[1333] E bind(5, {AF=10 [0000:0000:0000:0000:0000:0000:0000:0000]:25}, 28): Address already in use
+2025/10/16 13:40:44 socat[1382] E bind(5, {AF=10 [0000:0000:0000:0000:0000:0000:0000:0000]:25}, 28): Address already in use
+2025/10/16 14:07:29 socat[1833] W exiting on signal 15
+2025/10/16 14:07:29 socat[1812] W exiting on signal 15
+2025/10/16 14:07:50 socat[1982] W exiting on signal 15
+2025/10/16 14:10:48 socat[1993] W exiting on signal 15
+2025/10/16 14:14:42 socat[2103] W exiting on signal 15
+2025/10/16 14:49:43 socat[2373] W exiting on signal 15

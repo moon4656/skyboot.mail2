@@ -71,15 +71,15 @@ def test_smtp_send():
         
         # 메일 생성
         msg = MIMEMultipart()
-        msg['From'] = 'test@skyboot.com'
-        msg['To'] = 'test@example.com'
+        msg['From'] = 'test@skyboot.co.kr'
+        msg['To'] = 'moon4656@gmail.com'
         msg['Subject'] = 'SMTP 연결 테스트'
         
         body = "이것은 SMTP 서버 연결 테스트 메일입니다."
         msg.attach(MIMEText(body, 'plain'))
         
         # 메일 발송
-        smtp_server.sendmail('test@skyboot.com', 'test@example.com', msg.as_string())
+        smtp_server.sendmail('test@skyboot.co.kr', 'moon4656@gmail.com', msg.as_string())
         smtp_server.quit()
         
         print("✅ 테스트 메일 발송 성공")

@@ -54,6 +54,13 @@ class SaaSSettings(BaseSettings):
     ORG_SUBDOMAIN_ENABLED: bool = True
     
     # 메일 서버 설정 (조직별 설정 가능)
+    # DEFAULT_SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    # DEFAULT_SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
+    # DEFAULT_SMTP_USER: Optional[str] = os.getenv("SMTP_USER")
+    # DEFAULT_SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD")    
+    
+    # SMTP 설정 (조직별 설정 가능)
+    # 개발 환경: Gmail SMTP 사용, 프로덕션: Postfix 사용
     DEFAULT_SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
     DEFAULT_SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
     DEFAULT_SMTP_USER: Optional[str] = os.getenv("SMTP_USER")
@@ -153,11 +160,20 @@ class SaaSSettings(BaseSettings):
         return self.DATABASE_URL
     
     def get_smtp_config(self, org_id: Optional[str] = None) -> Dict[str, Any]:
-        """조직별 SMTP 설정 반환"""
-        # 기본 설정 (추후 조직별 설정으로 오버라이드 가능)
+        """조직별 SMTP 설정 반환 (환경에 따라 다른 설정 사용)"""
+        # 환경에 따른 SMTP 설정
+        if self.ENVIRONMENT == Environment.PRODUCTION:
+            # 프로덕션: Postfix 사용
+            host = "172.18.0.233"  # WSL Postfix IP
+            port = 25
+        else:
+            # 개발/스테이징: Gmail SMTP 사용
+            host = self.DEFAULT_SMTP_HOST
+            port = self.DEFAULT_SMTP_PORT
+        
         return {
-            "host": self.DEFAULT_SMTP_HOST,
-            "port": self.DEFAULT_SMTP_PORT,
+            "host": host,
+            "port": port,
             "user": self.DEFAULT_SMTP_USER,
             "password": self.DEFAULT_SMTP_PASSWORD,
             "from_email": self.DEFAULT_SMTP_FROM_EMAIL,
