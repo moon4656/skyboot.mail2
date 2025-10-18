@@ -828,6 +828,7 @@ async def mark_mail_as_read(
             details=f"메일 읽음 처리: {mail.subject}",
             mail_uuid=mail.mail_uuid,
             user_uuid=mail_user.user_uuid,
+            org_id=current_org_id,
             ip_address=None,  # TODO: 실제 IP 주소 추가
             user_agent=None   # TODO: 실제 User-Agent 추가
         )
@@ -919,6 +920,7 @@ async def mark_mail_as_unread(
         log_entry = MailLog(
             mail_uuid=mail.mail_uuid,
             user_uuid=current_user.user_uuid,
+            org_id=current_org_id,
             action="unread",
             details=f"메일 읽지 않음 처리: {mail.subject}",
             ip_address=None,  # TODO: 실제 IP 주소 추가
@@ -1021,8 +1023,8 @@ async def mark_all_mails_as_read(
             log_entry = MailLog(
                 mail_uuid=mail.mail_uuid,
                 user_uuid=current_user.user_uuid,
-                action="read",
-                timestamp=current_time
+                org_id=current_org_id,
+                action="read"
             )
             db.add(log_entry)
         
@@ -2010,7 +2012,7 @@ async def get_mail_logs(
         # 메일 로그 조회 (조직별 필터링)
         logs_query = db.query(MailLog).filter(
             MailLog.org_id == current_org_id,
-            MailLog.user_id == current_user.id
+            MailLog.user_uuid == current_user.user_uuid
         ).order_by(desc(MailLog.created_at))
         
         # 전체 개수 조회
@@ -2024,7 +2026,7 @@ async def get_mail_logs(
         for log in logs:
             log_items.append({
                 "id": log.id,
-                "mail_id": log.mail_id,
+                "mail_id": log.mail_uuid,
                 "action": log.action,
                 "details": log.details,
                 "ip_address": log.ip_address,
@@ -2087,8 +2089,8 @@ async def get_mail_log(
         # 메일 로그 조회 (조직별 필터링)
         logs = db.query(MailLog).filter(
             MailLog.org_id == current_org_id,
-            MailLog.user_id == current_user.id,
-            MailLog.mail_id == mail_id
+            MailLog.user_uuid == current_user.user_uuid,
+            MailLog.mail_uuid == mail_id
         ).order_by(desc(MailLog.created_at)).all()
         
         if not logs:
@@ -2102,7 +2104,7 @@ async def get_mail_log(
         for log in logs:
             log_items.append({
                 "id": log.id,
-                "mail_id": log.mail_id,
+                "mail_id": log.mail_uuid,
                 "action": log.action,
                 "details": log.details,
                 "ip_address": log.ip_address,

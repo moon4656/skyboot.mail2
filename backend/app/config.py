@@ -8,6 +8,7 @@ class Environment(str, Enum):
     DEVELOPMENT = "development"
     STAGING = "staging"
     PRODUCTION = "production"
+    TESTING = "testing"
 
 class SaaSSettings(BaseSettings):
     """SaaS 애플리케이션 설정 클래스"""
@@ -139,9 +140,23 @@ class SaaSSettings(BaseSettings):
     HEALTH_CHECK_INTERVAL: int = 60
     ALERT_EMAIL: Optional[str] = os.getenv("ALERT_EMAIL")
     
-    # 외부 API 설정
+    # 웹훅 및 API 설정
     WEBHOOK_SECRET: Optional[str] = os.getenv("WEBHOOK_SECRET")
     API_RATE_LIMIT: int = 1000
+    
+    # Microsoft Graph API 설정 (Office 365 연동)
+    MICROSOFT_CLIENT_ID: Optional[str] = os.getenv("MICROSOFT_CLIENT_ID")
+    MICROSOFT_CLIENT_SECRET: Optional[str] = os.getenv("MICROSOFT_CLIENT_SECRET")
+    MICROSOFT_TENANT_ID: Optional[str] = os.getenv("MICROSOFT_TENANT_ID", "common")
+    MICROSOFT_REDIRECT_URI: Optional[str] = os.getenv("MICROSOFT_REDIRECT_URI")
+    MICROSOFT_SCOPES: List[str] = [
+        "https://graph.microsoft.com/Mail.ReadWrite",
+        "https://graph.microsoft.com/Mail.Send",
+        "offline_access"
+    ]
+    
+    # 기본 URL 설정 (Graph API 콜백용)
+    BASE_URL: str = os.getenv("BASE_URL", "http://localhost:8000")
     
     # 개발 환경 설정
     RELOAD_ON_CHANGE: bool = True if ENVIRONMENT == Environment.DEVELOPMENT else False
@@ -167,7 +182,7 @@ class SaaSSettings(BaseSettings):
             host = "172.18.0.233"  # WSL Postfix IP
             port = 25
         else:
-            # 개발/스테이징: Gmail SMTP 사용
+            # 개발/스테이징/테스트: 기본 SMTP 사용
             host = self.DEFAULT_SMTP_HOST
             port = self.DEFAULT_SMTP_PORT
         
@@ -187,6 +202,10 @@ class SaaSSettings(BaseSettings):
     def is_development(self) -> bool:
         """개발 환경 여부 확인"""
         return self.ENVIRONMENT == Environment.DEVELOPMENT
+
+    def is_testing(self) -> bool:
+        """테스트 환경 여부 확인"""
+        return self.ENVIRONMENT == Environment.TESTING
 
 # 전역 설정 인스턴스
 settings = SaaSSettings()

@@ -375,6 +375,7 @@ async def send_mail(
         mail_log = MailLog(
             mail_uuid=mail.mail_uuid,
             user_uuid=mail_user.user_uuid,
+            org_id=current_org_id,
             action="SEND",
             details=f"메일 발송 - 수신자: {len(recipients)}명"
         )
@@ -443,6 +444,7 @@ async def send_mail(
                     fail_log = MailLog(
                         mail_uuid=mail.mail_uuid,
                         user_uuid=mail_user.user_uuid,
+                        org_id=current_org_id,
                         action="SEND_FAILED",
                         details=f"SMTP 발송 실패: {smtp_result.get('error')}"
                     )
@@ -458,6 +460,7 @@ async def send_mail(
                 fail_log = MailLog(
                     mail_uuid=mail.mail_uuid,
                     user_uuid=mail_user.user_uuid,
+                    org_id=current_org_id,
                     action="SEND_FAILED",
                     details=f"SMTP 발송 예외: {str(smtp_error)}"
                 )
@@ -599,6 +602,27 @@ async def send_mail(
         
         # SMTP 발송 결과에 따라 응답 결정
         if smtp_result.get('success', False):
+            # 메일 발송 성공 시 저장 용량 업데이트
+            try:
+                # 메일 크기 계산 (MB 단위로 변환)
+                total_mail_size_mb = total_mail_bytes / (1024 * 1024)
+                
+                # MailService 인스턴스 생성 및 저장 용량 업데이트
+                mail_service = MailService()
+                await mail_service._update_user_storage_usage(
+                    db=db,
+                    user_uuid=mail_user.user_uuid,
+                    org_id=current_org_id,
+                    size_mb=total_mail_size_mb,
+                    operation='add'
+                )
+                
+                logger.info(f"📊 저장 용량 업데이트 완료 - 조직: {current_org_id}, 사용자: {mail_user.user_uuid}, 추가 용량: {total_mail_size_mb:.2f}MB")
+                
+            except Exception as storage_error:
+                logger.error(f"⚠️ 저장 용량 업데이트 실패 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 오류: {str(storage_error)}")
+                # 저장 용량 업데이트 실패는 메일 발송 성공에 영향을 주지 않음
+            
             logger.info(f"✅ 메일 발송 완료 - 조직: {current_org_id}, 메일 ID: {mail.mail_uuid}, 수신자 수: {len(recipients)}, 첨부파일 수: {len(attachment_list)}")
             return MailSendResponse(
                 success=True,
@@ -778,6 +802,7 @@ async def send_mail_json(
         mail_log = MailLog(
             mail_uuid=mail.mail_uuid,
             user_uuid=mail_user.user_uuid,
+            org_id=current_org_id,
             action="SEND",
             details=f"메일 발송 - 수신자: {len(recipients)}명"
         )
@@ -823,6 +848,7 @@ async def send_mail_json(
                 fail_log = MailLog(
                     mail_uuid=mail.mail_uuid,
                     user_uuid=mail_user.user_uuid,
+                    org_id=current_org_id,
                     action="SEND_FAILED",
                     details=f"SMTP 발송 실패: {smtp_result.get('error')}"
                 )
@@ -840,6 +866,7 @@ async def send_mail_json(
             fail_log = MailLog(
                 mail_uuid=mail.mail_uuid,
                 user_uuid=mail_user.user_uuid,
+                org_id=current_org_id,
                 action="SEND_FAILED",
                 details=f"SMTP 발송 예외: {str(smtp_error)}"
             )
@@ -898,7 +925,7 @@ async def send_mail_json(
                         recipient_mail_user = db.query(MailUser).filter(
                             and_(
                                 MailUser.email == recipient.recipient_email,
-                                MailUser.organization_id == current_org_id
+                                MailUser.org_id == current_org_id
                             )
                         ).first()
                         
@@ -1860,6 +1887,7 @@ async def download_attachment(
             details=f"첨부파일 다운로드 - 파일명: {attachment.filename}, 크기: {attachment.file_size}바이트",
             mail_uuid=attachment.mail_uuid,
             user_uuid=current_user.user_uuid,
+            org_id=current_org_id,
             ip_address=None,  # TODO: 실제 IP 주소 추가
             user_agent=None   # TODO: 실제 User-Agent 추가
         )

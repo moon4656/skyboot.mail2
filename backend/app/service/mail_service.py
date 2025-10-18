@@ -13,6 +13,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, func
+from sqlalchemy import text
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -217,6 +218,7 @@ class MailService:
                 details=f"메일 발송 완료 - 수신자: {len(all_recipients)}명, 발송자: {sender_mail_user.email}",
                 mail_uuid=mail_uuid,
                 user_uuid=sender_mail_user.user_uuid,
+                org_id=org_id,
                 ip_address=None,  # TODO: 실제 요청에서 IP 주소 전달 필요
                 user_agent=None   # TODO: 실제 요청에서 User-Agent 전달 필요
             )
@@ -806,6 +808,7 @@ class MailService:
                 details=f"메일 읽기 - 제목: {mail.subject}, 읽기 유형: {'수신자' if is_recipient else '발송자'}",
                 mail_uuid=mail_uuid,
                 user_uuid=mail_user.user_uuid,
+                org_id=org_id,
                 ip_address=None,  # TODO: 실제 요청에서 IP 주소 전달 필요
                 user_agent=None   # TODO: 실제 요청에서 User-Agent 전달 필요
             )
@@ -905,6 +908,7 @@ class MailService:
                 mail_log = MailLog(
                     mail_uuid=mail_uuid,
                     user_uuid=mail_user.user_uuid,
+                    org_id=org_id,
                     action="delete",
                     details=f"메일 삭제 - 사용자: {mail_user.email}",
                     ip_address=None,  # TODO: 실제 요청에서 IP 주소 전달 필요
@@ -916,6 +920,28 @@ class MailService:
                 # 영구 삭제
                 if is_sender:
                     # 발송자인 경우 메일 자체를 삭제
+                    # 0. 저장 용량 감소를 위해 메일 크기 계산
+                    mail_size_mb = 0.0
+                    try:
+                        # 메일 본문 크기 계산 (UTF-8 기준)
+                        content_size = len(mail.content.encode('utf-8')) if mail.content else 0
+                        subject_size = len(mail.subject.encode('utf-8')) if mail.subject else 0
+                        mail_size_mb = (content_size + subject_size) / (1024 * 1024)
+                        
+                        # 첨부파일 크기 계산
+                        attachments = self.db.query(MailAttachment).filter(
+                            MailAttachment.mail_uuid == mail_uuid
+                        ).all()
+                        
+                        for attachment in attachments:
+                            if attachment.file_size:
+                                mail_size_mb += attachment.file_size / (1024 * 1024)
+                        
+                        logger.debug(f"📊 삭제할 메일 크기 계산 - 메일 UUID: {mail_uuid}, 크기: {mail_size_mb:.2f}MB")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 메일 크기 계산 실패 - 메일 UUID: {mail_uuid}, 오류: {str(e)}")
+                        mail_size_mb = 0.0
+                    
                     # 1. 먼저 mail_logs 테이블의 관련 레코드들을 삭제
                     mail_log_records = self.db.query(MailLog).filter(
                         MailLog.mail_uuid == mail_uuid
@@ -934,7 +960,16 @@ class MailService:
                         self.db.delete(recipient_record)
                         logger.debug(f"🗑️ mail_recipients 레코드 삭제 - 메일 UUID: {mail_uuid}, 수신자: {recipient_record.recipient_email}")
                     
-                    # 3. mail_in_folders 테이블의 관련 레코드들을 삭제
+                    # 3. mail_attachments 테이블의 관련 레코드들을 삭제
+                    mail_attachment_records = self.db.query(MailAttachment).filter(
+                        MailAttachment.mail_uuid == mail_uuid
+                    ).all()
+                    
+                    for attachment_record in mail_attachment_records:
+                        self.db.delete(attachment_record)
+                        logger.debug(f"🗑️ mail_attachments 레코드 삭제 - 메일 UUID: {mail_uuid}, 파일명: {attachment_record.filename}")
+                    
+                    # 4. mail_in_folders 테이블의 관련 레코드들을 삭제
                     mail_in_folder_records = self.db.query(MailInFolder).filter(
                         MailInFolder.mail_uuid == mail_uuid
                     ).all()
@@ -943,9 +978,22 @@ class MailService:
                         self.db.delete(record)
                         logger.debug(f"🗑️ mail_in_folders 레코드 삭제 - 메일 UUID: {mail_uuid}, 폴더 UUID: {record.folder_uuid}")
                     
-                    # 4. 그 다음 메일 자체를 삭제
+                    # 5. 그 다음 메일 자체를 삭제
                     self.db.delete(mail)
                     logger.info(f"🗑️ 메일 영구 삭제 완료 - 메일 UUID: {mail_uuid}")
+                    
+                    # 6. 저장 용량 감소 처리
+                    if mail_size_mb > 0:
+                        try:
+                            await self._update_user_storage_usage(
+                                org_id=org_id,
+                                user_uuid=user_uuid,
+                                storage_size_mb=mail_size_mb,
+                                operation="subtract"
+                            )
+                            logger.info(f"📉 저장 용량 감소 완료 - 사용자: {user_uuid}, 감소량: {mail_size_mb:.2f}MB")
+                        except Exception as e:
+                            logger.error(f"❌ 저장 용량 감소 실패 - 사용자: {user_uuid}, 오류: {str(e)}")
                 else:
                     # 수신자인 경우 수신자 레코드만 삭제
                     self.db.delete(recipient_record)
@@ -1032,6 +1080,7 @@ class MailService:
                     details=f"발신자 복원 - 원래 상태: {mail.status}",
                     mail_uuid=mail.mail_uuid,
                     user_uuid=mail_user.user_uuid,
+                    org_id=org_id,
                     ip_address=None,
                     user_agent=None
                 )
@@ -1048,6 +1097,7 @@ class MailService:
                     details="수신자 복원",
                     mail_uuid=mail.mail_uuid,
                     user_uuid=mail_user.user_uuid,
+                    org_id=org_id,
                     ip_address=None,
                     user_agent=None
                 )
@@ -1234,7 +1284,7 @@ class MailService:
                 RETURNING emails_sent_today, total_emails_sent;
                 """
                 
-                result = self.db.execute(upsert_sql, {
+                result = self.db.execute(text(upsert_sql), {
                     'org_id': org_id,
                     'usage_date': today,
                     'email_count': email_count,
@@ -1369,6 +1419,101 @@ class MailService:
             logger.info(f"🔄 기본 UPSERT 방식으로 재시도 - 조직: {org_id}")
             return await self._update_organization_usage(org_id, email_count)
 
+    async def _update_user_storage_usage(
+        self,
+        org_id: str,
+        user_uuid: str,
+        storage_size_mb: float,
+        operation: str = "add"
+    ) -> Dict[str, Any]:
+        """
+        사용자의 저장 용량 사용량을 업데이트합니다.
+        
+        Args:
+            org_id: 조직 ID
+            user_uuid: 사용자 UUID
+            storage_size_mb: 저장 용량 크기 (MB)
+            operation: 연산 타입 ("add" 또는 "subtract")
+            
+        Returns:
+            업데이트 결과 딕셔너리
+        """
+        try:
+            logger.info(f"💾 사용자 저장 용량 업데이트 시작 - 조직: {org_id}, 사용자: {user_uuid}, 크기: {storage_size_mb}MB, 연산: {operation}")
+            
+            # 사용자 조회
+            mail_user = self.db.query(MailUser).filter(
+                and_(
+                    MailUser.user_uuid == user_uuid,
+                    MailUser.organization_id == org_id
+                )
+            ).first()
+            
+            if not mail_user:
+                logger.warning(f"⚠️ 메일 사용자를 찾을 수 없음 - 조직: {org_id}, 사용자: {user_uuid}")
+                return {"success": False, "message": "메일 사용자를 찾을 수 없습니다."}
+            
+            # 현재 저장 용량 계산
+            current_storage_mb = mail_user.storage_used_mb or 0
+            
+            if operation == "add":
+                new_storage_mb = current_storage_mb + storage_size_mb
+            elif operation == "subtract":
+                new_storage_mb = max(0, current_storage_mb - storage_size_mb)  # 음수 방지
+            else:
+                raise ValueError(f"지원하지 않는 연산 타입: {operation}")
+            
+            # 사용자 저장 용량 업데이트
+            mail_user.storage_used_mb = new_storage_mb
+            
+            # 조직 전체 저장 용량 계산 및 업데이트
+            total_storage_mb = self.db.query(func.sum(MailUser.storage_used_mb)).filter(
+                MailUser.organization_id == org_id
+            ).scalar() or 0
+            
+            total_storage_gb = round(total_storage_mb / 1024, 2)
+            
+            # OrganizationUsage 테이블 업데이트
+            today = datetime.now(timezone.utc).date()
+            
+            upsert_sql = text("""
+                INSERT INTO organization_usage (
+                    organization_id, usage_date, current_users, current_storage_gb, 
+                    emails_sent_today, emails_received_today, total_emails_sent, total_emails_received
+                ) VALUES (
+                    :org_id, :usage_date, 0, :storage_gb, 0, 0, 0, 0
+                )
+                ON CONFLICT (organization_id, usage_date) 
+                DO UPDATE SET 
+                    current_storage_gb = :storage_gb,
+                    updated_at = CURRENT_TIMESTAMP
+            """)
+            
+            self.db.execute(upsert_sql, {
+                "org_id": org_id,
+                "usage_date": today,
+                "storage_gb": total_storage_gb
+            })
+            
+            self.db.commit()
+            
+            logger.info(f"✅ 사용자 저장 용량 업데이트 완료 - 조직: {org_id}, 사용자: {user_uuid}, "
+                       f"이전: {current_storage_mb}MB, 현재: {new_storage_mb}MB, 조직 전체: {total_storage_gb}GB")
+            
+            return {
+                "success": True,
+                "user_storage_mb": new_storage_mb,
+                "organization_storage_gb": total_storage_gb,
+                "operation": operation,
+                "size_changed_mb": storage_size_mb
+            }
+            
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"❌ 사용자 저장 용량 업데이트 실패 - 조직: {org_id}, 사용자: {user_uuid}, 오류: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {"success": False, "message": f"저장 용량 업데이트 실패: {str(e)}"}
+
     async def _notify_usage_thresholds(self, org_id: str, today_sent: int, increment: int, daily_limit: int) -> None:
         """
         일일 발송 제한 대비 임계값(80%/90%/100%) 도달 시 조직 관리자에게 알림을 발송합니다.
@@ -1484,3 +1629,243 @@ class MailService:
             logger.error(f"❌ 메일 발송 제한 검증 실패 - 조직: {org_id}, 오류: {str(e)}")
             # 검증 실패 시 안전하게 발송 허용 (기본 동작 유지)
             pass
+    
+    async def import_mails_from_graph_api(
+        self,
+        org_id: str,
+        user_uuid: str,
+        access_token: str,
+        folder_name: str = "inbox",
+        limit: int = 50
+    ) -> Dict[str, Any]:
+        """
+        Microsoft Graph API를 통해 Office 365 메일을 가져와서 SkyBoot Mail에 저장합니다.
+        
+        Args:
+            org_id: 조직 ID
+            user_uuid: 사용자 UUID
+            access_token: Microsoft Graph API 액세스 토큰
+            folder_name: 가져올 폴더명 (기본값: inbox)
+            limit: 가져올 메일 수 제한 (기본값: 50)
+            
+        Returns:
+            가져오기 결과 정보
+        """
+        try:
+            import httpx
+            
+            logger.info(f"📥 Graph API 메일 가져오기 시작 - 조직: {org_id}, 사용자: {user_uuid}, 폴더: {folder_name}")
+            
+            # 사용자 정보 조회
+            mail_user = self.db.query(MailUser).filter(
+                MailUser.org_id == org_id,
+                MailUser.user_uuid == user_uuid
+            ).first()
+            if not mail_user:
+                raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+            
+            # Microsoft Graph API 헤더 설정
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            }
+            
+            # Graph API URL 구성
+            graph_url = f"https://graph.microsoft.com/v1.0/me/mailFolders/{folder_name}/messages"
+            params = {
+                "$top": limit,
+                "$orderby": "receivedDateTime desc",
+                "$select": "id,subject,bodyPreview,body,from,toRecipients,ccRecipients,bccRecipients,receivedDateTime,sentDateTime,hasAttachments,importance,isRead"
+            }
+            
+            imported_count = 0
+            skipped_count = 0
+            error_count = 0
+            
+            async with httpx.AsyncClient() as client:
+                # Graph API 호출
+                response = await client.get(graph_url, headers=headers, params=params)
+                
+                if response.status_code != 200:
+                    logger.error(f"❌ Graph API 호출 실패 - 상태코드: {response.status_code}, 응답: {response.text}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Microsoft Graph API 호출 실패: {response.status_code}"
+                    )
+                
+                data = response.json()
+                messages = data.get("value", [])
+                
+                logger.info(f"📊 Graph API에서 {len(messages)}개 메일 조회됨")
+                
+                # 각 메일 처리
+                for message in messages:
+                    try:
+                        # 메일 ID 생성 (Graph API ID 기반)
+                        graph_mail_id = message.get("id", "")
+                        mail_uuid = f"graph_{graph_mail_id[:32]}"
+                        
+                        # 중복 확인
+                        existing_mail = self.db.query(Mail).filter(
+                            Mail.org_id == org_id,
+                            Mail.mail_uuid == mail_uuid
+                        ).first()
+                        
+                        if existing_mail:
+                            skipped_count += 1
+                            continue
+                        
+                        # 메일 정보 추출
+                        subject = message.get("subject", "제목 없음")
+                        body_content = message.get("body", {})
+                        content = body_content.get("content", "") if body_content else ""
+                        content_type = body_content.get("contentType", "text") if body_content else "text"
+                        
+                        # 발송자 정보
+                        from_info = message.get("from", {})
+                        sender_email = from_info.get("emailAddress", {}).get("address", "") if from_info else ""
+                        sender_name = from_info.get("emailAddress", {}).get("name", "") if from_info else ""
+                        
+                        # 수신자 정보
+                        to_recipients = message.get("toRecipients", [])
+                        cc_recipients = message.get("ccRecipients", [])
+                        bcc_recipients = message.get("bccRecipients", [])
+                        
+                        # 날짜 정보
+                        received_datetime = message.get("receivedDateTime")
+                        sent_datetime = message.get("sentDateTime")
+                        
+                        # 우선순위 매핑
+                        importance = message.get("importance", "normal")
+                        priority = MailPriority.HIGH if importance == "high" else MailPriority.NORMAL
+                        
+                        # 메일 레코드 생성
+                        mail = Mail(
+                            mail_uuid=mail_uuid,
+                            org_id=org_id,
+                            sender_uuid=user_uuid,  # 가져온 사용자를 발송자로 설정
+                            sender_email=sender_email,
+                            sender_name=sender_name,
+                            subject=subject,
+                            content=content,
+                            content_type=content_type,
+                            priority=priority.value,
+                            status=MailStatus.RECEIVED.value,
+                            sent_at=datetime.fromisoformat(sent_datetime.replace('Z', '+00:00')) if sent_datetime else None,
+                            received_at=datetime.fromisoformat(received_datetime.replace('Z', '+00:00')) if received_datetime else datetime.now(timezone.utc),
+                            created_at=datetime.now(timezone.utc),
+                            is_read=message.get("isRead", False),
+                            has_attachments=message.get("hasAttachments", False)
+                        )
+                        
+                        self.db.add(mail)
+                        self.db.flush()  # mail_uuid 확보
+                        
+                        # 수신자 정보 저장
+                        all_recipients = []
+                        
+                        # TO 수신자
+                        for recipient in to_recipients:
+                            email_addr = recipient.get("emailAddress", {})
+                            if email_addr.get("address"):
+                                all_recipients.append({
+                                    "email": email_addr.get("address"),
+                                    "name": email_addr.get("name", ""),
+                                    "type": RecipientType.TO
+                                })
+                        
+                        # CC 수신자
+                        for recipient in cc_recipients:
+                            email_addr = recipient.get("emailAddress", {})
+                            if email_addr.get("address"):
+                                all_recipients.append({
+                                    "email": email_addr.get("address"),
+                                    "name": email_addr.get("name", ""),
+                                    "type": RecipientType.CC
+                                })
+                        
+                        # BCC 수신자
+                        for recipient in bcc_recipients:
+                            email_addr = recipient.get("emailAddress", {})
+                            if email_addr.get("address"):
+                                all_recipients.append({
+                                    "email": email_addr.get("address"),
+                                    "name": email_addr.get("name", ""),
+                                    "type": RecipientType.BCC
+                                })
+                        
+                        # 수신자 레코드 생성
+                        for recipient_info in all_recipients:
+                            recipient = MailRecipient(
+                                mail_uuid=mail_uuid,
+                                recipient_email=recipient_info["email"],
+                                recipient_name=recipient_info["name"],
+                                recipient_type=recipient_info["type"].value,
+                                org_id=org_id,
+                                recipient_uuid=user_uuid,  # 가져온 사용자를 수신자로 설정
+                                is_read=message.get("isRead", False),
+                                received_at=mail.received_at
+                            )
+                            self.db.add(recipient)
+                        
+                        # 받은편지함 폴더에 추가
+                        inbox_folder = await self._get_or_create_folder(org_id, user_uuid, "받은편지함")
+                        
+                        mail_in_folder = MailInFolder(
+                            mail_uuid=mail_uuid,
+                            folder_id=inbox_folder.folder_id,
+                            org_id=org_id,
+                            user_uuid=user_uuid,
+                            added_at=datetime.now(timezone.utc)
+                        )
+                        self.db.add(mail_in_folder)
+                        
+                        # 로그 기록
+                        mail_log = MailLog(
+                            action="import_from_graph",
+                            details=f"Graph API에서 가져옴 - 원본 ID: {graph_mail_id}",
+                            mail_uuid=mail_uuid,
+                            user_uuid=user_uuid,
+                            org_id=org_id,
+                            ip_address=None,
+                            user_agent="Microsoft Graph API"
+                        )
+                        self.db.add(mail_log)
+                        
+                        imported_count += 1
+                        
+                    except Exception as e:
+                        error_count += 1
+                        logger.error(f"❌ 개별 메일 가져오기 실패 - Graph ID: {message.get('id', 'unknown')}, 오류: {str(e)}")
+                        continue
+                
+                # 변경사항 커밋
+                self.db.commit()
+                
+                # 조직 사용량 업데이트
+                if imported_count > 0:
+                    await self._update_organization_usage(org_id, imported_count)
+                
+                result = {
+                    "success": True,
+                    "imported_count": imported_count,
+                    "skipped_count": skipped_count,
+                    "error_count": error_count,
+                    "total_processed": len(messages),
+                    "folder": folder_name
+                }
+                
+                logger.info(f"✅ Graph API 메일 가져오기 완료 - 조직: {org_id}, 가져옴: {imported_count}, 건너뜀: {skipped_count}, 오류: {error_count}")
+                
+                return result
+                
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"❌ Graph API 메일 가져오기 실패 - 조직: {org_id}, 사용자: {user_uuid}, 오류: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            self.db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"메일 가져오기 중 오류가 발생했습니다: {str(e)}"
+            )

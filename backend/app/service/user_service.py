@@ -805,3 +805,215 @@ class UserService:
         except Exception as e:
             logger.error(f"❌ 조직 사용량 업데이트 오류: {str(e)}")
             # 조직 사용량 업데이트 실패가 주요 기능을 방해하지 않도록 예외를 다시 발생시키지 않음
+
+    async def update_microsoft_tokens(
+        self, 
+        user_id: str, 
+        access_token: str, 
+        refresh_token: str, 
+        expires_at: datetime
+    ) -> bool:
+        """
+        사용자의 Microsoft Graph API 토큰을 업데이트합니다.
+        
+        Args:
+            user_id: 사용자 ID
+            access_token: Microsoft 액세스 토큰
+            refresh_token: Microsoft 리프레시 토큰
+            expires_at: 토큰 만료 시간
+        
+        Returns:
+            업데이트 성공 여부
+        """
+        try:
+            logger.info(f"🔑 Microsoft 토큰 업데이트 시작 - 사용자ID: {user_id}")
+            
+            user = self.db.query(User).filter(User.user_id == user_id).first()
+            if not user:
+                logger.error(f"❌ 사용자를 찾을 수 없음 - 사용자ID: {user_id}")
+                return False
+            
+            # Microsoft 토큰 정보 업데이트
+            user.microsoft_access_token = access_token
+            user.microsoft_refresh_token = refresh_token
+            user.microsoft_token_expires_at = expires_at
+            user.microsoft_connected_at = datetime.now(timezone.utc)
+            user.updated_at = datetime.now(timezone.utc)
+            
+            self.db.commit()
+            
+            logger.info(f"✅ Microsoft 토큰 업데이트 완료 - 사용자: {user.email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Microsoft 토큰 업데이트 실패 - 사용자ID: {user_id}, 오류: {str(e)}")
+            self.db.rollback()
+            return False
+
+    async def get_microsoft_access_token(self, user_id: str) -> Optional[str]:
+        """
+        사용자의 Microsoft 액세스 토큰을 조회합니다.
+        토큰이 만료된 경우 리프레시를 시도합니다.
+        
+        Args:
+            user_id: 사용자 ID
+        
+        Returns:
+            유효한 액세스 토큰 또는 None
+        """
+        try:
+            logger.info(f"🔑 Microsoft 토큰 조회 시작 - 사용자ID: {user_id}")
+            
+            user = self.db.query(User).filter(User.user_id == user_id).first()
+            if not user or not user.microsoft_access_token:
+                logger.warning(f"⚠️ Microsoft 토큰 없음 - 사용자ID: {user_id}")
+                return None
+            
+            # 토큰 만료 확인
+            if user.microsoft_token_expires_at and user.microsoft_token_expires_at <= datetime.now(timezone.utc):
+                logger.info(f"🔄 Microsoft 토큰 만료됨, 리프레시 시도 - 사용자: {user.email}")
+                
+                # 토큰 리프레시 시도
+                refreshed_token = await self._refresh_microsoft_token(user)
+                if refreshed_token:
+                    return refreshed_token
+                else:
+                    logger.warning(f"⚠️ Microsoft 토큰 리프레시 실패 - 사용자: {user.email}")
+                    return None
+            
+            logger.info(f"✅ Microsoft 토큰 조회 완료 - 사용자: {user.email}")
+            return user.microsoft_access_token
+            
+        except Exception as e:
+            logger.error(f"❌ Microsoft 토큰 조회 실패 - 사용자ID: {user_id}, 오류: {str(e)}")
+            return None
+
+    async def _refresh_microsoft_token(self, user: User) -> Optional[str]:
+        """
+        Microsoft 리프레시 토큰을 사용하여 새로운 액세스 토큰을 획득합니다.
+        
+        Args:
+            user: 사용자 객체
+        
+        Returns:
+            새로운 액세스 토큰 또는 None
+        """
+        try:
+            if not user.microsoft_refresh_token:
+                logger.warning(f"⚠️ Microsoft 리프레시 토큰 없음 - 사용자: {user.email}")
+                return None
+            
+            import httpx
+            from ..config import settings
+            
+            # 토큰 리프레시 요청
+            token_data = {
+                "client_id": settings.MICROSOFT_CLIENT_ID,
+                "client_secret": settings.MICROSOFT_CLIENT_SECRET,
+                "grant_type": "refresh_token",
+                "refresh_token": user.microsoft_refresh_token
+            }
+            
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                    data=token_data,
+                    headers={"Content-Type": "application/x-www-form-urlencoded"}
+                )
+            
+            if response.status_code == 200:
+                token_info = response.json()
+                new_access_token = token_info.get("access_token")
+                new_refresh_token = token_info.get("refresh_token", user.microsoft_refresh_token)
+                expires_in = token_info.get("expires_in", 3600)
+                
+                # 새로운 토큰으로 업데이트
+                user.microsoft_access_token = new_access_token
+                user.microsoft_refresh_token = new_refresh_token
+                user.microsoft_token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                user.updated_at = datetime.now(timezone.utc)
+                
+                self.db.commit()
+                
+                logger.info(f"✅ Microsoft 토큰 리프레시 완료 - 사용자: {user.email}")
+                return new_access_token
+            else:
+                logger.error(f"❌ Microsoft 토큰 리프레시 실패 - 사용자: {user.email}, 상태코드: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Microsoft 토큰 리프레시 오류 - 사용자: {user.email}, 오류: {str(e)}")
+            return None
+
+    async def clear_microsoft_tokens(self, user_id: str) -> bool:
+        """
+        사용자의 Microsoft 토큰을 삭제합니다.
+        
+        Args:
+            user_id: 사용자 ID
+        
+        Returns:
+            삭제 성공 여부
+        """
+        try:
+            logger.info(f"🗑️ Microsoft 토큰 삭제 시작 - 사용자ID: {user_id}")
+            
+            user = self.db.query(User).filter(User.user_id == user_id).first()
+            if not user:
+                logger.error(f"❌ 사용자를 찾을 수 없음 - 사용자ID: {user_id}")
+                return False
+            
+            # Microsoft 토큰 정보 삭제
+            user.microsoft_access_token = None
+            user.microsoft_refresh_token = None
+            user.microsoft_token_expires_at = None
+            user.microsoft_connected_at = None
+            user.updated_at = datetime.now(timezone.utc)
+            
+            self.db.commit()
+            
+            logger.info(f"✅ Microsoft 토큰 삭제 완료 - 사용자: {user.email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Microsoft 토큰 삭제 실패 - 사용자ID: {user_id}, 오류: {str(e)}")
+            self.db.rollback()
+            return False
+
+    async def get_microsoft_connection_status(self, user_id: str) -> Dict[str, Any]:
+        """
+        사용자의 Microsoft 계정 연동 상태를 조회합니다.
+        
+        Args:
+            user_id: 사용자 ID
+        
+        Returns:
+            연동 상태 정보
+        """
+        try:
+            user = self.db.query(User).filter(User.user_id == user_id).first()
+            if not user:
+                return {
+                    "connected": False,
+                    "error": "사용자를 찾을 수 없습니다"
+                }
+            
+            is_connected = bool(user.microsoft_access_token)
+            is_token_valid = False
+            
+            if is_connected and user.microsoft_token_expires_at:
+                is_token_valid = user.microsoft_token_expires_at > datetime.now(timezone.utc)
+            
+            return {
+                "connected": is_connected,
+                "token_valid": is_token_valid,
+                "connected_at": user.microsoft_connected_at.isoformat() if user.microsoft_connected_at else None,
+                "expires_at": user.microsoft_token_expires_at.isoformat() if user.microsoft_token_expires_at else None
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Microsoft 연동 상태 조회 실패 - 사용자ID: {user_id}, 오류: {str(e)}")
+            return {
+                "connected": False,
+                "error": "연동 상태 조회 중 오류가 발생했습니다"
+            }

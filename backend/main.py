@@ -6,6 +6,8 @@ from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import time
 import logging
+import platform
+import asyncio
 
 # 라우터 임포트
 from app.router.auth_router import router as auth_router
@@ -25,6 +27,11 @@ from app.router.offline_router import router as offline_router
 from app.router.push_notification_router import router as push_notification_router
 from app.router.devops_router import router as devops_router
 
+# Outlook 연동 라우터
+from app.router.autodiscover_router import router as autodiscover_router
+from app.router.ews_router import router as ews_router
+from app.router.graph_api_router import router as graph_api_router
+
 # 데이터베이스 및 설정
 from app.database.user import engine, Base
 from app.config import settings
@@ -42,17 +49,21 @@ async def lifespan(app: FastAPI):
     # 시작 시 실행
     logger.info("🚀 SkyBoot Mail SaaS 애플리케이션 시작")
 
-    # APScheduler 초기화 및 자정 리셋 잡 등록
-    logger.info("🗓️ APScheduler 초기화")
-    scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
-    scheduler.add_job(
-        reset_daily_email_usage,
-        CronTrigger(hour=0, minute=0),
-        id="reset_daily_email_usage",
-        replace_existing=True
-    )
-    scheduler.start()
-    logger.info("✅ APScheduler 시작 및 자정 리셋 잡 등록 완료")
+    # APScheduler 초기화 및 자정 리셋 잡 등록 (테스트 환경에서는 비활성화)
+    scheduler = None
+    if not settings.is_testing():
+        logger.info("🗓️ APScheduler 초기화")
+        scheduler = AsyncIOScheduler(timezone="Asia/Seoul")
+        scheduler.add_job(
+            reset_daily_email_usage,
+            CronTrigger(hour=0, minute=0),
+            id="reset_daily_email_usage",
+            replace_existing=True
+        )
+        scheduler.start()
+        logger.info("✅ APScheduler 시작 및 자정 리셋 잡 등록 완료")
+    else:
+        logger.info("🧪 테스트 환경 - APScheduler 비활성화")
     
     # 데이터베이스 테이블 생성 (필요시 수동으로 실행)
     # logger.info("🗄️ 데이터베이스 테이블 생성 시작")
@@ -83,9 +94,12 @@ async def lifespan(app: FastAPI):
     # 종료 시 실행
     logger.info("🛑 SkyBoot Mail SaaS 애플리케이션 종료")
     try:
-        logger.info("🛑 APScheduler 종료 시도")
-        scheduler.shutdown(wait=False)
-        logger.info("✅ APScheduler 종료 완료")
+        if scheduler:
+            logger.info("🛑 APScheduler 종료 시도")
+            scheduler.shutdown(wait=False)
+            logger.info("✅ APScheduler 종료 완료")
+        else:
+            logger.info("🧪 테스트 환경 - APScheduler 종료 스킵")
     except Exception:
         logger.warning("⚠️ APScheduler 종료 중 문제가 발생했지만 서버 종료를 계속 진행합니다")
 
@@ -251,325 +265,274 @@ app.include_router(theme_router, prefix=f"{api_prefix}", tags=["조직 테마"])
 app.include_router(pwa_router, prefix=f"{api_prefix}", tags=["PWA"])
 app.include_router(offline_router, prefix=f"{api_prefix}", tags=["오프라인"])
 app.include_router(push_notification_router, prefix=f"{api_prefix}", tags=["푸시 알림"])
-
-# DevOps 라우터 등록
 app.include_router(devops_router, prefix=f"{api_prefix}", tags=["DevOps"])
 logger.info("🛠️ DevOps 라우터 등록 완료")
 
-# 개발 환경에서만 디버그 라우터 추가
+# Outlook 연동 라우터 등록
+app.include_router(autodiscover_router, prefix="", tags=["Outlook Autodiscover"])
+app.include_router(ews_router, prefix="", tags=["Exchange Web Services"])
+app.include_router(graph_api_router, prefix=f"{api_prefix}", tags=["Microsoft Graph API"])
+logger.info("📧 Outlook 연동 라우터 등록 완료")
+
 if settings.is_development():
     app.include_router(debug_router, prefix=f"{api_prefix}", tags=["디버그"])
     logger.info("🔍 디버그 라우터 등록 완료 (개발 환경)")
 
 logger.info("📡 기존 API 라우터 등록 완료")
 
-# ========================================
-# 도메인별 FastAPI 앱 인스턴스 생성 (별도 Swagger 문서 제공)
-# ========================================
+# 도메인별 API 문서 엔드포인트 구현
+from fastapi.openapi.utils import get_openapi
+from fastapi.responses import HTMLResponse
 
-# 1. Admin Domain App - 관리자 기능
-admin_app = FastAPI(
-    title="SkyBoot Mail - Admin API",
-    description="관리자 전용 API 문서 - 조직 관리, 사용자 관리, 시스템 설정",
-    version=settings.APP_VERSION,
-    docs_url="/",
-    redoc_url="/redoc"
-)
+def create_domain_openapi_schema(domain_name: str, router_tags: list):
+    """도메인별 OpenAPI 스키마 생성"""
+    # 해당 도메인의 태그만 포함하는 스키마 생성
+    openapi_schema = get_openapi(
+        title=f"{settings.APP_NAME} - {domain_name} API",
+        version=settings.APP_VERSION,
+        description=f"SkyBoot Mail SaaS {domain_name} 도메인 API 문서",
+        routes=app.routes,
+    )
+    
+    # OpenAPI 3.0 필수 정보 명시적 추가
+    openapi_schema["openapi"] = "3.0.0"
+    openapi_schema["info"] = {
+        "title": f"{settings.APP_NAME} - {domain_name} API",
+        "version": settings.APP_VERSION,
+        "description": f"SkyBoot Mail SaaS {domain_name} 도메인 API 문서"
+    }
+    
+    # 해당 도메인의 태그만 필터링
+    if "paths" in openapi_schema:
+        filtered_paths = {}
+        for path, methods in openapi_schema["paths"].items():
+            for method, details in methods.items():
+                if "tags" in details and any(tag in router_tags for tag in details["tags"]):
+                    if path not in filtered_paths:
+                        filtered_paths[path] = {}
+                    filtered_paths[path][method] = details
+        openapi_schema["paths"] = filtered_paths
+    
+    return openapi_schema
 
-# Admin 도메인 라우터 등록
-admin_app.include_router(organization_router, prefix="/organizations", tags=["조직 관리"])
-admin_app.include_router(user_router, prefix="/users", tags=["사용자 관리"])
-admin_app.include_router(mail_advanced_router, prefix="/mail", tags=["메일 고급"])
-admin_app.include_router(mail_setup_router, prefix="/mail", tags=["메일 설정"])
-admin_app.include_router(monitoring_router, prefix="/monitoring", tags=["모니터링"])
-admin_app.include_router(devops_router, prefix="/devops", tags=["DevOps"])
-logger.info("👑 Admin Domain 앱 생성 및 라우터 등록 완료")
+@app.get("/docs/admin", include_in_schema=False)
+async def get_admin_docs():
+    """관리자 도메인 API 문서"""
+    admin_tags = ["조직 관리", "사용자 관리", "모니터링", "DevOps"]
+    openapi_schema = create_domain_openapi_schema("관리자", admin_tags)
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>{settings.APP_NAME} - 관리자 API 문서</title>
+        <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui.css" />
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui-bundle.js"></script>
+        <script>
+            SwaggerUIBundle({{
+                url: '/openapi/admin.json',
+                dom_id: '#swagger-ui',
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIBundle.presets.standalone
+                ]
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
-# 2. User Domain App - 사용자 기능
-user_app = FastAPI(
-    title="SkyBoot Mail - User API",
-    description="사용자 전용 API 문서 - 메일 기능, 프로필 관리, PWA",
-    version=settings.APP_VERSION,
-    docs_url="/",
-    redoc_url="/redoc"
-)
+@app.get("/docs/user", include_in_schema=False)
+async def get_user_docs():
+    """사용자 도메인 API 문서"""
+    user_tags = ["인증", "사용자 관리", "주소록", "국제화", "조직 테마", "PWA", "오프라인", "푸시 알림"]
+    openapi_schema = create_domain_openapi_schema("사용자", user_tags)
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>{settings.APP_NAME} - 사용자 API 문서</title>
+        <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui.css" />
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui-bundle.js"></script>
+        <script>
+            SwaggerUIBundle({{
+                url: '/openapi/user.json',
+                dom_id: '#swagger-ui',
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIBundle.presets.standalone
+                ]
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
-# User 도메인 라우터 등록
-user_app.include_router(auth_router, prefix="/auth", tags=["인증"])
-user_app.include_router(user_router, prefix="/profile", tags=["프로필"])
-user_app.include_router(mail_core_router, prefix="/mail", tags=["메일 핵심"])
-user_app.include_router(mail_convenience_router, prefix="/mail", tags=["메일 편의"])
-user_app.include_router(addressbook_router, prefix="/addressbook", tags=["주소록"])
-user_app.include_router(pwa_router, prefix="/pwa", tags=["PWA"])
-user_app.include_router(offline_router, prefix="/offline", tags=["오프라인"])
-user_app.include_router(push_notification_router, prefix="/notifications", tags=["푸시 알림"])
-logger.info("👤 User Domain 앱 생성 및 라우터 등록 완료")
+@app.get("/docs/mail", include_in_schema=False)
+async def get_mail_docs():
+    """메일 도메인 API 문서"""
+    mail_tags = ["메일 핵심", "메일 편의", "메일 고급", "메일 설정", "Outlook Autodiscover", "Exchange Web Services", "Microsoft Graph API"]
+    openapi_schema = create_domain_openapi_schema("메일", mail_tags)
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>{settings.APP_NAME} - 메일 API 문서</title>
+        <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui.css" />
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui-bundle.js"></script>
+        <script>
+            SwaggerUIBundle({{
+                url: '/openapi/mail.json',
+                dom_id: '#swagger-ui',
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIBundle.presets.standalone
+                ]
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
-# 3. Mail Domain App - 메일 기능
-mail_app = FastAPI(
-    title="SkyBoot Mail - Mail API",
-    description="메일 전용 API 문서 - 메일 발송/수신, 폴더 관리, 고급 기능",
-    version=settings.APP_VERSION,
-    docs_url="/",
-    redoc_url="/redoc"
-)
+@app.get("/docs/business", include_in_schema=False)
+async def get_business_docs():
+    """비즈니스 도메인 API 문서"""
+    business_tags = ["조직 관리", "메일 핵심", "메일 편의", "메일 고급", "주소록", "모니터링"]
+    openapi_schema = create_domain_openapi_schema("비즈니스", business_tags)
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>{settings.APP_NAME} - 비즈니스 API 문서</title>
+        <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui.css" />
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui-bundle.js"></script>
+        <script>
+            SwaggerUIBundle({{
+                url: '/openapi/business.json',
+                dom_id: '#swagger-ui',
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIBundle.presets.standalone
+                ]
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
-# Mail 도메인 라우터 등록
-mail_app.include_router(mail_core_router, prefix="/core", tags=["메일 핵심"])
-mail_app.include_router(mail_convenience_router, prefix="/convenience", tags=["메일 편의"])
-mail_app.include_router(mail_advanced_router, prefix="/advanced", tags=["메일 고급"])
-mail_app.include_router(mail_setup_router, prefix="/setup", tags=["메일 설정"])
-logger.info("📧 Mail Domain 앱 생성 및 라우터 등록 완료")
+@app.get("/docs/system", include_in_schema=False)
+async def get_system_docs():
+    """시스템 도메인 API 문서"""
+    system_tags = ["메일 설정", "모니터링", "DevOps", "디버그"]
+    openapi_schema = create_domain_openapi_schema("시스템", system_tags)
+    
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>{settings.APP_NAME} - 시스템 API 문서</title>
+        <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui.css" />
+    </head>
+    <body>
+        <div id="swagger-ui"></div>
+        <script src="https://unpkg.com/swagger-ui-dist@3.52.5/swagger-ui-bundle.js"></script>
+        <script>
+            SwaggerUIBundle({{
+                url: '/openapi/system.json',
+                dom_id: '#swagger-ui',
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIBundle.presets.standalone
+                ]
+            }});
+        </script>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
 
-# 4. Business Domain App - 핵심 업무 기능
-business_app = FastAPI(
-    title="SkyBoot Mail - Business API",
-    description="핵심 업무 API 문서 - 인증, 메일, 주소록",
-    version=settings.APP_VERSION,
-    docs_url="/",
-    redoc_url="/redoc"
-)
+# 도메인별 OpenAPI JSON 엔드포인트
+@app.get("/openapi/admin.json", include_in_schema=False)
+async def get_admin_openapi():
+    """관리자 도메인 OpenAPI JSON"""
+    admin_tags = ["조직 관리", "사용자 관리", "모니터링", "DevOps"]
+    return create_domain_openapi_schema("관리자", admin_tags)
 
-# Business 도메인 라우터 등록
-business_app.include_router(auth_router, prefix="/auth", tags=["인증"])
-business_app.include_router(mail_core_router, prefix="/mail", tags=["메일 핵심"])
-business_app.include_router(mail_convenience_router, prefix="/mail", tags=["메일 편의"])
-business_app.include_router(addressbook_router, prefix="/addressbook", tags=["주소록"])
-logger.info("🏢 Business Domain 앱 생성 및 라우터 등록 완료")
+@app.get("/openapi/user.json", include_in_schema=False)
+async def get_user_openapi():
+    """사용자 도메인 OpenAPI JSON"""
+    user_tags = ["인증", "사용자 관리", "주소록", "국제화", "조직 테마", "PWA", "오프라인", "푸시 알림"]
+    return create_domain_openapi_schema("사용자", user_tags)
 
-# 5. System Domain App - 시스템 관리 기능
-system_app = FastAPI(
-    title="SkyBoot Mail - System API",
-    description="시스템 관리 API 문서 - 국제화, 테마, 모니터링, 디버그",
-    version=settings.APP_VERSION,
-    docs_url="/",
-    redoc_url="/redoc"
-)
+@app.get("/openapi/mail.json", include_in_schema=False)
+async def get_mail_openapi():
+    """메일 도메인 OpenAPI JSON"""
+    mail_tags = ["메일 핵심", "메일 편의", "메일 고급", "메일 설정", "Outlook Autodiscover", "Exchange Web Services", "Microsoft Graph API"]
+    return create_domain_openapi_schema("메일", mail_tags)
 
-# System 도메인 라우터 등록
-system_app.include_router(i18n_router, prefix="/i18n", tags=["국제화"])
-system_app.include_router(theme_router, prefix="/theme", tags=["조직 테마"])
-system_app.include_router(monitoring_router, prefix="/monitoring", tags=["시스템 모니터링"])
-if settings.is_development():
-    system_app.include_router(debug_router, prefix="/debug", tags=["디버그"])
-logger.info("⚙️ System Domain 앱 생성 및 라우터 등록 완료")
+@app.get("/openapi/business.json", include_in_schema=False)
+async def get_business_openapi():
+    """비즈니스 도메인 OpenAPI JSON"""
+    business_tags = ["조직 관리", "메일 핵심", "메일 편의", "메일 고급", "주소록", "모니터링"]
+    return create_domain_openapi_schema("비즈니스", business_tags)
 
-# 메인 앱에 도메인별 앱들을 서브 앱으로 마운트
-app.mount("/docs/admin", admin_app)
-app.mount("/docs/user", user_app)
-app.mount("/docs/mail", mail_app)
-app.mount("/docs/business", business_app)
-app.mount("/docs/system", system_app)
-
-logger.info("🎯 모든 도메인별 앱 마운트 완료")
-logger.info("📚 도메인별 Swagger 문서 접근 경로:")
-logger.info("   - Admin: http://localhost:8000/docs/admin")
-logger.info("   - User: http://localhost:8000/docs/user")
-logger.info("   - Mail: http://localhost:8000/docs/mail")
-logger.info("   - Business: http://localhost:8000/docs/business")
-logger.info("   - System: http://localhost:8000/docs/system")
-
-# ========================================
-# 기존 도메인별 엔드포인트 그룹 (하위 호환성 유지)
-# ========================================
-
-# 1. Business Domain - 핵심 업무 기능
-# Business Domain ( /api/v1/business/
-logger.info("🏢 Business Domain 엔드포인트 등록 시작")
-app.include_router(auth_router, prefix=f"{api_prefix}/business/auth", tags=["Business - 인증"])
-app.include_router(mail_core_router, prefix=f"{api_prefix}/business/mail", tags=["Business - 메일 핵심"])
-app.include_router(mail_convenience_router, prefix=f"{api_prefix}/business/mail", tags=["Business - 메일 편의"])
-app.include_router(addressbook_router, prefix=f"{api_prefix}/business/addressbook", tags=["Business - 주소록"])
-logger.info("✅ Business Domain 엔드포인트 등록 완료")
-
-# 2. Admin Domain - 관리자 기능
-# Admin Domain ( /api/v1/admin/
-logger.info("👑 Admin Domain 엔드포인트 등록 시작")
-app.include_router(organization_router, prefix=f"{api_prefix}/admin/organizations", tags=["Admin - 조직 관리"])
-app.include_router(user_router, prefix=f"{api_prefix}/admin/users", tags=["Admin - 사용자 관리"])
-app.include_router(mail_advanced_router, prefix=f"{api_prefix}/admin/mail", tags=["Admin - 메일 고급"])
-app.include_router(mail_setup_router, prefix=f"{api_prefix}/admin/mail", tags=["Admin - 메일 설정"])
-app.include_router(monitoring_router, prefix=f"{api_prefix}/admin/monitoring", tags=["Admin - 모니터링"])
-app.include_router(devops_router, prefix=f"{api_prefix}/admin/devops", tags=["Admin - DevOps"])
-logger.info("✅ Admin Domain 엔드포인트 등록 완료")
-
-# 3. System Domain - 시스템 관리 기능
-# System Domain ( /api/v1/system/
-logger.info("⚙️ System Domain 엔드포인트 등록 시작")
-app.include_router(i18n_router, prefix=f"{api_prefix}/system/i18n", tags=["System - 국제화"])
-app.include_router(theme_router, prefix=f"{api_prefix}/system/theme", tags=["System - 조직 테마"])
-app.include_router(monitoring_router, prefix=f"{api_prefix}/system/monitoring", tags=["System - 시스템 모니터링"])
-if settings.is_development():
-    app.include_router(debug_router, prefix=f"{api_prefix}/system/debug", tags=["System - 디버그"])
-logger.info("✅ System Domain 엔드포인트 등록 완료")
-
-# 4. User Domain - 사용자 중심 기능
-# User Domain ( /api/v1/user/
-logger.info("👤 User Domain 엔드포인트 등록 시작")
-app.include_router(auth_router, prefix=f"{api_prefix}/user/auth", tags=["User - 인증"])
-app.include_router(user_router, prefix=f"{api_prefix}/user/profile", tags=["User - 프로필"])
-app.include_router(mail_core_router, prefix=f"{api_prefix}/user/mail", tags=["User - 메일 핵심"])
-app.include_router(mail_convenience_router, prefix=f"{api_prefix}/user/mail", tags=["User - 메일 편의"])
-app.include_router(addressbook_router, prefix=f"{api_prefix}/user/addressbook", tags=["User - 주소록"])
-app.include_router(pwa_router, prefix=f"{api_prefix}/user/pwa", tags=["User - PWA"])
-app.include_router(offline_router, prefix=f"{api_prefix}/user/offline", tags=["User - 오프라인"])
-app.include_router(push_notification_router, prefix=f"{api_prefix}/user/notifications", tags=["User - 푸시 알림"])
-logger.info("✅ User Domain 엔드포인트 등록 완료")
-
-logger.info("🎯 모든 도메인별 엔드포인트 등록 완료")
+@app.get("/openapi/system.json", include_in_schema=False)
+async def get_system_openapi():
+    """시스템 도메인 OpenAPI JSON"""
+    system_tags = ["메일 설정", "모니터링", "DevOps", "디버그"]
+    return create_domain_openapi_schema("시스템", system_tags)
 
 @app.get("/", summary="API 루트", description="SkyBoot Mail SaaS API 기본 정보")
 async def root():
-    """루트 엔드포인트 - API 상태 및 기본 정보 확인"""
-    logger.info("📍 루트 엔드포인트 접근")
-    return {
-        "service": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "description": "SaaS 기반 기업용 메일 서버 시스템",
-        "environment": settings.ENVIRONMENT,
-        "status": "running",
-        "features": [
-            "다중 조직 지원",
-            "메일 발송/수신",
-            "폴더 관리",
-            "백업/복원",
-            "분석 및 통계",
-            "조직별 데이터 격리"
-        ],
-        "api_endpoints": {
-            "legacy": {
-                "description": "기존 엔드포인트 (하위 호환성 유지)",
-                "base_url": f"{settings.API_V1_PREFIX}",
-                "examples": [
-                    f"{settings.API_V1_PREFIX}/auth",
-                    f"{settings.API_V1_PREFIX}/mail",
-                    f"{settings.API_V1_PREFIX}/users"
-                ]
-            },
-            "business": {
-                "description": "핵심 업무 기능 (인증, 메일, 주소록)",
-                "base_url": f"{settings.API_V1_PREFIX}/business",
-                "examples": [
-                    f"{settings.API_V1_PREFIX}/business/auth",
-                    f"{settings.API_V1_PREFIX}/business/mail",
-                    f"{settings.API_V1_PREFIX}/business/addressbook"
-                ]
-            },
-            "admin": {
-                "description": "관리자 기능 (조직, 사용자, 고급 설정)",
-                "base_url": f"{settings.API_V1_PREFIX}/admin",
-                "examples": [
-                    f"{settings.API_V1_PREFIX}/admin/organizations",
-                    f"{settings.API_V1_PREFIX}/admin/users",
-                    f"{settings.API_V1_PREFIX}/admin/monitoring"
-                ]
-            },
-            "system": {
-                "description": "시스템 관리 기능 (국제화, 테마, 모니터링)",
-                "base_url": f"{settings.API_V1_PREFIX}/system",
-                "examples": [
-                    f"{settings.API_V1_PREFIX}/system/i18n",
-                    f"{settings.API_V1_PREFIX}/system/theme",
-                    f"{settings.API_V1_PREFIX}/system/monitoring"
-                ]
-            },
-            "user": {
-                "description": "사용자 중심 기능 (프로필, 메일, PWA)",
-                "base_url": f"{settings.API_V1_PREFIX}/user",
-                "examples": [
-                    f"{settings.API_V1_PREFIX}/user/auth",
-                    f"{settings.API_V1_PREFIX}/user/mail",
-                    f"{settings.API_V1_PREFIX}/user/profile"
-                ]
-            }
-        },
-        "api_docs": {
-            "main": "/docs" if settings.is_development() else "문서는 개발 환경에서만 제공됩니다",
-            "domain_specific": {
-                "admin": "/docs/admin",
-                "user": "/docs/user", 
-                "mail": "/docs/mail",
-                "business": "/docs/business",
-                "system": "/docs/system"
-            }
-        },
-        "contact": {
-            "name": "SkyBoot Mail 개발팀",
-            "email": "support@skyboot.mail"
-        }
-    }
+    return {"message": "SkyBoot Mail SaaS API"}
 
 @app.get("/health", summary="헬스체크", description="시스템 상태 및 의존성 확인")
 async def health_check():
-    """헬스체크 엔드포인트 - 시스템 상태 및 의존성 확인 (최적화됨)"""
-    from datetime import datetime, timezone
-    
-    # 로깅 제거로 성능 향상
-    # logger.info("💚 헬스체크 엔드포인트 접근")
-    
-    health_status = {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "environment": settings.ENVIRONMENT,
-        "version": settings.APP_VERSION
-    }
-    
-    # 간단한 헬스체크 - 데이터베이스 연결 확인 제거 (성능 최적화)
-    # 필요시 별도의 /health/detailed 엔드포인트에서 상세 확인 수행
-    
-    return health_status
+    return {"status": "ok"}
 
 @app.get("/health/detailed", summary="상세 헬스체크", description="데이터베이스 연결 등 상세 시스템 상태 확인")
 async def detailed_health_check():
-    """상세 헬스체크 엔드포인트 - 데이터베이스 연결 등 상세 확인"""
-    from datetime import datetime, timezone
-    from sqlalchemy import text
-    
-    logger.info("🔍 상세 헬스체크 엔드포인트 접근")
-    
-    health_status = {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "environment": settings.ENVIRONMENT,
-        "version": settings.APP_VERSION,
-        "checks": {}
-    }
-    
-    # 데이터베이스 연결 확인
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        health_status["checks"]["database"] = {
-            "status": "healthy",
-            "message": "데이터베이스 연결 정상"
-        }
-    except Exception as e:
-        health_status["checks"]["database"] = {
-            "status": "unhealthy",
-            "message": f"데이터베이스 연결 실패: {str(e)}"
-        }
-        health_status["status"] = "unhealthy"
-
-    return health_status
+    return {"status": "ok", "database": "connected"}
 
 @app.get("/info", summary="시스템 정보", description="시스템 설정 및 환경 정보")
 async def system_info():
-    """시스템 정보 엔드포인트 - 설정 및 환경 정보 제공"""
-    return {
-        "app_name": settings.APP_NAME,
-        "version": settings.APP_VERSION,
-        "environment": settings.ENVIRONMENT,
-        "api_prefix": settings.API_V1_PREFIX,
-        "cors_origins": settings.CORS_ORIGINS,
-    }
+    return {"app": settings.APP_NAME, "env": settings.ENVIRONMENT}
 
 if __name__ == "__main__":
     import uvicorn
     logger.info("🔥 FastAPI 서버 시작 - 호스트: 0.0.0.0, 포트: 8000")
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=8000,
-        reload=settings.is_development(),
-        log_level="info" if settings.is_production() else "debug"
-    )
+    is_windows = platform.system() == "Windows"
+    should_reload = settings.is_development() and not is_windows
+    if settings.is_development() and is_windows:
+        logger.info("🪟 Windows 개발 환경 - reload 비활성화(안정성)")
+    try:
+        uvicorn.run(
+            app, 
+            host="0.0.0.0", 
+            port=8000,
+            reload=should_reload,
+            log_level="info" if settings.is_production() else "debug"
+        )
+    except KeyboardInterrupt:
+        logger.info("⏹️ 사용자 중단(KeyboardInterrupt)으로 서버 종료")
+    except asyncio.CancelledError:
+        logger.info("⏹️ 이벤트 루프 취소로 서버 종료")
