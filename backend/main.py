@@ -32,6 +32,9 @@ from app.router.autodiscover_router import router as autodiscover_router
 from app.router.ews_router import router as ews_router
 from app.router.graph_api_router import router as graph_api_router
 
+# 테스트 CSV 라우터
+from app.router.test_csv_router import router as test_csv_router
+
 # 데이터베이스 및 설정
 from app.database.user import engine, Base
 from app.config import settings
@@ -257,6 +260,7 @@ app.include_router(mail_convenience_router, prefix=f"{api_prefix}/mail", tags=["
 app.include_router(mail_advanced_router, prefix=f"{api_prefix}/mail", tags=["메일 고급"]) 
 app.include_router(mail_setup_router, prefix=f"{api_prefix}/mail", tags=["메일 설정"])
 app.include_router(addressbook_router, prefix=f"{api_prefix}/addressbook", tags=["주소록"])
+app.include_router(test_csv_router, prefix=f"{api_prefix}/test-csv", tags=["테스트 CSV"])
 app.include_router(monitoring_router, prefix=f"{api_prefix}", tags=["모니터링"])
 
 # 국제화, 브랜딩, PWA, 오프라인, 푸시 알림 라우터 등록

@@ -78,7 +78,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
         self.excluded_paths = excluded_paths or [
             "/docs", "/redoc", "/openapi.json", "/favicon.ico",
             "/static", "/health", "/info", "/api/system",
-            "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/organizations/create"
+            "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/organizations/create",
+            "/api/v1/addressbook",  # 임시로 addressbook 경로 제외 (테스트용)
+            "/api/v1/test-csv"      # 임시로 test-csv 경로 제외 (테스트용)
         ]
         self.default_org_code = default_org_code
         logger.info("🏢 통합 테넌트 미들웨어 초기화 완료")
@@ -158,12 +160,15 @@ class TenantMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         
         try:
+            # 모든 요청에 대해 로그 출력 (디버깅용)
+            logger.info(f"🔍 테넌트 미들웨어 요청 처리 시작 - 경로: {request.url.path}, 메서드: {request.method}")
+            
             # 제외 경로 확인
             if self._is_excluded_path(request.url.path):
-                logger.debug(f"🚫 테넌트 검증 제외 경로: {request.url.path}")
+                logger.info(f"🚫 테넌트 검증 제외 경로: {request.url.path}")
                 return await call_next(request)
             
-            logger.debug(f"🏢 테넌트 검증 필요 경로: {request.url.path}")
+            logger.info(f"🏢 테넌트 검증 필요 경로: {request.url.path}")
             
             # 조직 정보 추출 및 설정
             org_info = await self._extract_organization_info(request)

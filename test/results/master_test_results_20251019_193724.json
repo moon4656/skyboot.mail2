@@ -1,0 +1,273 @@
+﻿{
+    "OverallStatistics":  {
+                              "FailedTests":  0,
+                              "OverallSuccessRate":  0,
+                              "TotalTests":  0,
+                              "SuccessfulTests":  0
+                          },
+    "MethodStats":  {
+
+                    },
+    "StatusCodeStats":  {
+
+                        },
+    "RouterStatistics":  [
+                             {
+                                 "RouterName":  "Auth Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0760539,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "Organization Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0758255,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "User Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.1331033999999995,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "Mail Core Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0675856,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "Mail Convenience Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0784902,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "Mail Advanced Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0683523,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "Mail Setup Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0938371,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "Addressbook Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0926821,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "Debug Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0521708,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "Monitoring Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0760287,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             },
+                             {
+                                 "RouterName":  "Theme Router",
+                                 "ExecutionStatus":  "Failed",
+                                 "Duration":  4.0868968,
+                                 "TotalTests":  0,
+                                 "SuccessfulTests":  0,
+                                 "FailedTests":  0,
+                                 "SuccessRate":  0,
+                                 "ExitCode":  1
+                             }
+                         ],
+    "RouterExecutionResults":  [
+                                   {
+                                       "RouterName":  "Auth Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870199712)\/",
+                                       "EndTime":  "\/Date(1760870203788)\/",
+                                       "Duration":  4.0760539,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Auth_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Auth_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "Organization Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870203801)\/",
+                                       "EndTime":  "\/Date(1760870207877)\/",
+                                       "Duration":  4.0758255,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Organization_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Organization_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "User Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870207880)\/",
+                                       "EndTime":  "\/Date(1760870212013)\/",
+                                       "Duration":  4.1331033999999995,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\User_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\User_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "Mail Core Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870212016)\/",
+                                       "EndTime":  "\/Date(1760870216084)\/",
+                                       "Duration":  4.0675856,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Mail_Core_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Mail_Core_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "Mail Convenience Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870216087)\/",
+                                       "EndTime":  "\/Date(1760870220165)\/",
+                                       "Duration":  4.0784902,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Mail_Convenience_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Mail_Convenience_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "Mail Advanced Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870220173)\/",
+                                       "EndTime":  "\/Date(1760870224241)\/",
+                                       "Duration":  4.0683523,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Mail_Advanced_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Mail_Advanced_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "Mail Setup Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870224245)\/",
+                                       "EndTime":  "\/Date(1760870228339)\/",
+                                       "Duration":  4.0938371,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Mail_Setup_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Mail_Setup_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "Addressbook Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870228342)\/",
+                                       "EndTime":  "\/Date(1760870232435)\/",
+                                       "Duration":  4.0926821,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Addressbook_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Addressbook_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "Debug Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870232440)\/",
+                                       "EndTime":  "\/Date(1760870236492)\/",
+                                       "Duration":  4.0521708,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Debug_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Debug_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "Monitoring Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870236498)\/",
+                                       "EndTime":  "\/Date(1760870240574)\/",
+                                       "Duration":  4.0760287,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Monitoring_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Monitoring_Router_error.log"
+                                   },
+                                   {
+                                       "RouterName":  "Theme Router",
+                                       "Status":  "Failed",
+                                       "StartTime":  "\/Date(1760870240579)\/",
+                                       "EndTime":  "\/Date(1760870244666)\/",
+                                       "Duration":  4.0868968,
+                                       "ExitCode":  1,
+                                       "ErrorMessage":  "Test execution failed (Exit code: 1)",
+                                       "ResultFile":  null,
+                                       "OutputLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Theme_Router_output.log",
+                                       "ErrorLog":  "C:\\Users\\moon4\\skyboot.mail2\\test\\results\\Theme_Router_error.log"
+                                   }
+                               ],
+    "TestInfo":  {
+                     "StartTime":  "\/Date(1760870195990)\/",
+                     "BaseUrl":  "http://localhost:8000",
+                     "Duration":  48.7039993,
+                     "TestName":  "SkyBoot Mail SaaS - Master Test Runner",
+                     "CompletedRouters":  11,
+                     "EndTime":  "\/Date(1760870244694)\/",
+                     "TotalRouters":  11,
+                     "FailedRouters":  11
+                 },
+    "AllTestResults":  [
+
+                       ]
+}

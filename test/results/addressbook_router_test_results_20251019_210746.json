@@ -1,0 +1,352 @@
+﻿[
+    {
+        "TestName":  "Admin Login",
+        "Method":  "POST",
+        "Endpoint":  "/auth/login",
+        "StatusCode":  200,
+        "Response":  "Login Success",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:37"
+    },
+    {
+        "TestName":  "Regular User Login",
+        "Method":  "POST",
+        "Endpoint":  "/auth/login",
+        "StatusCode":  200,
+        "Response":  "Login Success",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Get Contact List (Empty)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  200,
+        "Response":  "{\"items\":[{\"contact_uuid\":\"3311108a-39f6-4f05-9eda-42f8f8357036\",\"name\":\"Jane Smith\",\"email\":\"jane@example.com\",\"phone\":\"02-9876-5432\",\"mobile\":\"010-9876-5432\",\"company\":\"User Company\",\"title\":\"Assistant Manager\",\"department_id\":null,\"address\":\"456 User Street, Seoul\",\"memo\":\"Regular user contact\",\"favorite\":true,\"profile_image_url\":null,\"groups\":[]}],\"total\":1,\"page\":1,\"size\":20}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Create Contact (Admin)",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  200,
+        "Response":  "Contact created successfully",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Create Contact (Regular User)",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  400,
+        "Response":  "원격 서버에서 (400) 잘못된 요청 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "Contact creation failed",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Create Contact with Duplicate Email",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  400,
+        "Response":  "원격 서버에서 (400) 잘못된 요청 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Create Contact with Invalid Email",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  422,
+        "Response":  "원격 서버에서 (422) Unprocessable Entity 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Get Contact List (With Data)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  200,
+        "Response":  "{\"items\":[{\"contact_uuid\":\"e165da9a-626c-4a6b-aae0-fb36397796b3\",\"name\":\"John Doe\",\"email\":\"john@example.com\",\"phone\":\"02-1234-5678\",\"mobile\":\"010-1234-5678\",\"company\":\"Test Company\",\"title\":\"Manager\",\"department_id\":null,\"address\":\"123 Test Street, Seoul\",\"memo\":\"Test contact\",\"favorite\":false,\"profile_image_url\":null,\"groups\":[]},{\"contact_uuid\":\"3311108a-39f6-4f05-9eda-42f8f8357036\",\"name\":\"Jane Smith\",\"email\":\"jane@example.com\",\"phone\":\"02-9876-5432\",\"mobile\":\"010-9876-5432\",\"company\":\"User Company\",\"title\":\"Assistant Manager\",\"department_id\":null,\"address\":\"456 User Street, Seoul\",\"memo\":\"Regular user contact\",\"favorite\":true,\"profile_image_url\":null,\"groups\":[]}],\"total\":2,\"page\":1,\"size\":20}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Get Contact List (Pagination)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts?page=1\u0026size=1",
+        "StatusCode":  200,
+        "Response":  "{\"items\":[{\"contact_uuid\":\"e165da9a-626c-4a6b-aae0-fb36397796b3\",\"name\":\"John Doe\",\"email\":\"john@example.com\",\"phone\":\"02-1234-5678\",\"mobile\":\"010-1234-5678\",\"company\":\"Test Company\",\"title\":\"Manager\",\"department_id\":null,\"address\":\"123 Test Street, Seoul\",\"memo\":\"Test contact\",\"favorite\":false,\"profile_image_url\":null,\"groups\":[]}],\"total\":2,\"page\":1,\"size\":1}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Search Contacts by Name",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts?q=John",
+        "StatusCode":  200,
+        "Response":  "{\"items\":[{\"contact_uuid\":\"e165da9a-626c-4a6b-aae0-fb36397796b3\",\"name\":\"John Doe\",\"email\":\"john@example.com\",\"phone\":\"02-1234-5678\",\"mobile\":\"010-1234-5678\",\"company\":\"Test Company\",\"title\":\"Manager\",\"department_id\":null,\"address\":\"123 Test Street, Seoul\",\"memo\":\"Test contact\",\"favorite\":false,\"profile_image_url\":null,\"groups\":[]}],\"total\":1,\"page\":1,\"size\":20}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Search Contacts by Email",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts?q=john@example.com",
+        "StatusCode":  200,
+        "Response":  "{\"items\":[{\"contact_uuid\":\"e165da9a-626c-4a6b-aae0-fb36397796b3\",\"name\":\"John Doe\",\"email\":\"john@example.com\",\"phone\":\"02-1234-5678\",\"mobile\":\"010-1234-5678\",\"company\":\"Test Company\",\"title\":\"Manager\",\"department_id\":null,\"address\":\"123 Test Street, Seoul\",\"memo\":\"Test contact\",\"favorite\":false,\"profile_image_url\":null,\"groups\":[]}],\"total\":1,\"page\":1,\"size\":20}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Get Contact Details",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts/e165da9a-626c-4a6b-aae0-fb36397796b3",
+        "StatusCode":  200,
+        "Response":  "{\"contact_uuid\":\"e165da9a-626c-4a6b-aae0-fb36397796b3\",\"name\":\"John Doe\",\"email\":\"john@example.com\",\"phone\":\"02-1234-5678\",\"mobile\":\"010-1234-5678\",\"company\":\"Test Company\",\"title\":\"Manager\",\"department_id\":null,\"address\":\"123 Test Street, Seoul\",\"memo\":\"Test contact\",\"favorite\":false,\"profile_image_url\":null,\"groups\":[]}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Get Non-existent Contact",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts/non-existent-uuid",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Update Contact",
+        "Method":  "PUT",
+        "Endpoint":  "/addressbook/contacts/e165da9a-626c-4a6b-aae0-fb36397796b3",
+        "StatusCode":  200,
+        "Response":  "{\"contact_uuid\":\"e165da9a-626c-4a6b-aae0-fb36397796b3\",\"name\":\"John Doe (Updated)\",\"email\":\"john@example.com\",\"phone\":\"02-1234-5678\",\"mobile\":\"010-1234-5678\",\"company\":\"Test Company\",\"title\":\"Senior Manager\",\"department_id\":null,\"address\":\"123 Test Street, Seoul\",\"memo\":\"Updated memo\",\"favorite\":true,\"profile_image_url\":null,\"groups\":[]}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Update Non-existent Contact",
+        "Method":  "PUT",
+        "Endpoint":  "/addressbook/contacts/non-existent-uuid",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Get Group List (Empty)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  200,
+        "Response":  "[{\"id\":2,\"name\":\"Sales Team\",\"description\":\"Sales and Marketing Team\"}]",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Create Group",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  200,
+        "Response":  "Group created successfully",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Create Second Group",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  409,
+        "Response":  "원격 서버에서 (409) 충돌 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "Group creation failed",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Create Group with Duplicate Name",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  409,
+        "Response":  "원격 서버에서 (409) 충돌 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Get Group List (With Data)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  200,
+        "Response":  "[{\"id\":7,\"name\":\"Development Team\",\"description\":\"Software Development Team\"},{\"id\":2,\"name\":\"Sales Team\",\"description\":\"Sales and Marketing Team\"}]",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Update Group",
+        "Method":  "PUT",
+        "Endpoint":  "/addressbook/groups/7",
+        "StatusCode":  200,
+        "Response":  "{\"id\":7,\"name\":\"Development Team (Updated)\",\"description\":\"Software Development and QA Team\"}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Update Non-existent Group",
+        "Method":  "PUT",
+        "Endpoint":  "/addressbook/groups/99999",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Add Contact to Group",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts/e165da9a-626c-4a6b-aae0-fb36397796b3/groups/7",
+        "StatusCode":  200,
+        "Response":  "{\"success\":true}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Add Non-existent Contact to Group",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts/non-existent-uuid/groups/7",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Add Contact to Non-existent Group",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts/e165da9a-626c-4a6b-aae0-fb36397796b3/groups/99999",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Get Contact Details (With Group Info)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts/e165da9a-626c-4a6b-aae0-fb36397796b3",
+        "StatusCode":  200,
+        "Response":  "{\"contact_uuid\":\"e165da9a-626c-4a6b-aae0-fb36397796b3\",\"name\":\"John Doe (Updated)\",\"email\":\"john@example.com\",\"phone\":\"02-1234-5678\",\"mobile\":\"010-1234-5678\",\"company\":\"Test Company\",\"title\":\"Senior Manager\",\"department_id\":null,\"address\":\"123 Test Street, Seoul\",\"memo\":\"Updated memo\",\"favorite\":true,\"profile_image_url\":null,\"groups\":[{\"id\":7,\"name\":\"Development Team (Updated)\",\"description\":\"Software Development and QA Team\"}]}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:45"
+    },
+    {
+        "TestName":  "Remove Contact from Group",
+        "Method":  "DELETE",
+        "Endpoint":  "/addressbook/contacts/e165da9a-626c-4a6b-aae0-fb36397796b3/groups/7",
+        "StatusCode":  200,
+        "Response":  "{\"success\":true}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:46"
+    },
+    {
+        "TestName":  "Remove Already Removed Contact-Group Relationship",
+        "Method":  "DELETE",
+        "Endpoint":  "/addressbook/contacts/e165da9a-626c-4a6b-aae0-fb36397796b3/groups/7",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:46"
+    },
+    {
+        "TestName":  "Export Contacts to CSV",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts/export",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:46"
+    },
+    {
+        "TestName":  "Access without Authentication",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  403,
+        "Response":  "원격 서버에서 (403) 사용할 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:46"
+    },
+    {
+        "TestName":  "Access with Invalid Token",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  401,
+        "Response":  "원격 서버에서 (401) 권한이 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:46"
+    },
+    {
+        "TestName":  "Delete Contact",
+        "Method":  "DELETE",
+        "Endpoint":  "/addressbook/contacts/e165da9a-626c-4a6b-aae0-fb36397796b3",
+        "StatusCode":  200,
+        "Response":  "{\"success\":true}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:46"
+    },
+    {
+        "TestName":  "Delete Non-existent Contact",
+        "Method":  "DELETE",
+        "Endpoint":  "/addressbook/contacts/non-existent-uuid",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:46"
+    },
+    {
+        "TestName":  "Delete Group",
+        "Method":  "DELETE",
+        "Endpoint":  "/addressbook/groups/7",
+        "StatusCode":  200,
+        "Response":  "{\"success\":true}",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:46"
+    },
+    {
+        "TestName":  "Delete Non-existent Group",
+        "Method":  "DELETE",
+        "Endpoint":  "/addressbook/groups/99999",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:07:46"
+    }
+]

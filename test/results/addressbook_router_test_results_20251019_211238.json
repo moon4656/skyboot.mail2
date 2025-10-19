@@ -1,0 +1,242 @@
+﻿[
+    {
+        "TestName":  "Admin Login",
+        "Method":  "POST",
+        "Endpoint":  "/auth/login",
+        "StatusCode":  200,
+        "Response":  "Login Success",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Regular User Login",
+        "Method":  "POST",
+        "Endpoint":  "/auth/login",
+        "StatusCode":  200,
+        "Response":  "Login Success",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Get Contact List (Empty)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Create Contact (Admin)",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "Contact creation failed",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Create Contact (Regular User)",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "Contact creation failed",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Create Contact with Duplicate Email",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Create Contact with Invalid Email",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Get Contact List (With Data)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Get Contact List (Pagination)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts?page=1\u0026size=1",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Search Contacts by Name",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts?q=John",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Search Contacts by Email",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts?q=john@example.com",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Get Non-existent Contact",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts/non-existent-uuid",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Update Non-existent Contact",
+        "Method":  "PUT",
+        "Endpoint":  "/addressbook/contacts/non-existent-uuid",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Get Group List (Empty)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Create Group",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "Group creation failed",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Create Second Group",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "Group creation failed",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Create Group with Duplicate Name",
+        "Method":  "POST",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Get Group List (With Data)",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/groups",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Update Non-existent Group",
+        "Method":  "PUT",
+        "Endpoint":  "/addressbook/groups/99999",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Export Contacts to CSV",
+        "Method":  "GET",
+        "Endpoint":  "/api/v1/addressbook/contacts/export",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Access without Authentication",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Access with Invalid Token",
+        "Method":  "GET",
+        "Endpoint":  "/addressbook/contacts",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  false,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Delete Non-existent Contact",
+        "Method":  "DELETE",
+        "Endpoint":  "/addressbook/contacts/non-existent-uuid",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    },
+    {
+        "TestName":  "Delete Non-existent Group",
+        "Method":  "DELETE",
+        "Endpoint":  "/addressbook/groups/99999",
+        "StatusCode":  404,
+        "Response":  "원격 서버에서 (404) 찾을 수 없음 오류를 반환했습니다.",
+        "Success":  true,
+        "ErrorMessage":  "",
+        "Timestamp":  "2025-10-19 21:12:38"
+    }
+]
