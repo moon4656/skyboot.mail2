@@ -35,11 +35,11 @@ class User(Base):
     backup_codes = Column(Text, comment="백업 코드 JSON")
     last_2fa_at = Column(DateTime(timezone=True), comment="마지막 2FA 인증 시간")
     
-    # Microsoft Graph API 연동 필드
-    microsoft_access_token = Column(Text, comment="Microsoft Graph API 액세스 토큰")
-    microsoft_refresh_token = Column(Text, comment="Microsoft Graph API 리프레시 토큰")
-    microsoft_token_expires_at = Column(DateTime(timezone=True), comment="Microsoft 토큰 만료 시간")
-    microsoft_connected_at = Column(DateTime(timezone=True), comment="Microsoft 계정 연동 시간")
+    # Microsoft Graph API 연동 필드 (데이터베이스에 컬럼이 없어서 주석 처리)
+    # microsoft_access_token = Column(Text, comment="Microsoft Graph API 액세스 토큰")
+    # microsoft_refresh_token = Column(Text, comment="Microsoft Graph API 리프레시 토큰")
+    # microsoft_token_expires_at = Column(DateTime(timezone=True), comment="Microsoft 토큰 만료 시간")
+    # microsoft_connected_at = Column(DateTime(timezone=True), comment="Microsoft 계정 연동 시간")
     
     # 시간 정보
     created_at = Column(DateTime(timezone=True), server_default=func.now(), comment="생성 시간")

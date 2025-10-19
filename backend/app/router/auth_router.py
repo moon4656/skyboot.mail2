@@ -9,7 +9,7 @@ from ..schemas import UserCreate, UserResponse, UserLogin, Token, TokenRefresh, 
 from ..schemas.auth_schema import (
     RateLimitConfig, TwoFactorSetupRequest, TwoFactorSetupResponse, TwoFactorVerifyRequest,
     TwoFactorLoginRequest, TwoFactorDisableRequest, AuthResponse, AuthApiResponse,
-    SSOLoginRequest, RoleRequest
+    SSOLoginRequest, RoleRequest, UserRoleUpdateRequest
 )
 from ..service.auth_service import AuthService, get_current_user
 from ..service.user_service import UserService
@@ -871,7 +871,7 @@ async def get_role_info(
 @router.put("/users/{user_id}/role", summary="사용자 역할 변경")
 async def update_user_role(
     user_id: str,
-    request_data: RoleRequest,
+    request_data: UserRoleUpdateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):

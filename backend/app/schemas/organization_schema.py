@@ -64,6 +64,7 @@ class OrganizationBase(BaseModel):
             'mail_retention_days',
             'max_attachment_size_mb',
             'max_mail_size_mb',
+            'max_mailbox_size_mb',    # 메일박스 최대 크기 설정
             'enable_spam_filter',
             'enable_virus_scan',
             'enable_encryption',
@@ -72,8 +73,11 @@ class OrganizationBase(BaseModel):
             'notification_settings',
             'security_settings',
             'feature_flags',
-            'features',  # 추가된 키
-            'theme'      # 추가된 키
+            'features',           # 추가된 키
+            'theme',              # 추가된 키
+            'imap_enabled',       # IMAP 서버 활성화 설정
+            'smtp_enabled',       # SMTP 서버 활성화 설정
+            'mail_server_enabled' # 메일 서버 전체 활성화 설정
         }
         
         for key in v.keys():

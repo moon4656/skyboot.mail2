@@ -191,6 +191,11 @@ class SecurityEventLog(BaseModel):
     severity: str = Field(..., description="심각도 (low, medium, high, critical)")
 
 
+class UserRoleUpdateRequest(BaseModel):
+    """사용자 역할 변경 요청"""
+    role: str = Field(..., min_length=1, max_length=50, description="새로운 역할명")
+
+
 class AuthApiResponse(BaseModel):
     """인증 API 응답 기본 형식"""
     success: bool = Field(..., description="성공 여부")
