@@ -23,6 +23,7 @@ from app.database.user import Base
 from app.model.user_model import User
 from app.model.organization_model import Organization, OrganizationStatus, OrganizationSettings, OrganizationUsage
 from app.model.mail_model import MailUser, Mail, MailRecipient
+from app.model.addressbook_model import Contact, Department, Group, ContactGroup
 
 # Alembic Config 객체
 config = context.config

@@ -38,6 +38,18 @@ class RBACService:
             ],
             "level": 100
         },
+        "system_admin": {
+            "name": "시스템 관리자",
+            "description": "시스템 전체 관리 권한",
+            "permissions": [
+                "system:*",
+                "organization:*",
+                "user:*",
+                "mail:*",
+                "settings:*"
+            ],
+            "level": 100
+        },        
         "org_admin": {
             "name": "조직 관리자",
             "description": "조직 내 모든 관리 권한",
@@ -334,8 +346,8 @@ class RBACService:
             관리 가능 여부
         """
         try:
-            # 슈퍼 관리자는 모든 사용자 관리 가능
-            if manager.role == "super_admin":
+            # 슈퍼 관리자와 시스템 관리자는 모든 사용자 관리 가능
+            if manager.role in ["super_admin", "system_admin"]:
                 return True
             
             # 같은 조직 내에서만 관리 가능
@@ -392,7 +404,7 @@ class RBACService:
             admin_level = self.DEFAULT_ROLES.get(admin_user.role, {}).get("level", 0)
             new_role_level = self.DEFAULT_ROLES.get(new_role, {}).get("level", 0)
             
-            if admin_user.role != "super_admin" and new_role_level >= admin_level:
+            if admin_user.role not in ["super_admin", "system_admin"] and new_role_level >= admin_level:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="자신보다 높은 권한의 역할로 변경할 수 없습니다."

@@ -11,12 +11,28 @@ class UserBase(BaseModel):
     email: EmailStr = Field(..., description="이메일 주소")
     org_code: str = Field(..., description="조직 코드")
 
-class UserCreate(UserBase):
+class UserCreate(BaseModel):
     """사용자 생성 스키마"""
+    user_id: str = Field(..., min_length=3, max_length=50, description="사용자 ID")
     username: str = Field(..., min_length=3, max_length=100, description="사용자명")
     email: EmailStr = Field(..., description="이메일 주소")
     password: str = Field(..., min_length=4, description="비밀번호 (개발용: 최소 4자, 프로덕션: 8자 이상 권장)")
     full_name: Optional[str] = Field(None, max_length=100, description="전체 이름")
+    # org_code는 서버에서 자동 설정됨
+    
+    # Pydantic v2 구성 및 Swagger 예시
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "user_id": "user02",
+                "username": "김철수",
+                "email": "user02@example.com",
+                "password": "test1234",
+                "full_name": "김철수 대리"
+            }
+        }
+    )
 
 class UserResponse(BaseModel):
     """사용자 응답 스키마"""
@@ -61,7 +77,7 @@ class UserUpdate(BaseModel):
                 "username": "이성용",
                 "full_name": "이성용 과장",
                 "is_active": True,
-                "roles": ["user", "admin"]
+                "roles": ["user"]
             }
         }
     )

@@ -79,7 +79,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
             "/docs", "/redoc", "/openapi.json", "/favicon.ico",
             "/static", "/health", "/info", "/api/system",
             "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/organizations/create",
-            "/api/v1/addressbook",  # 임시로 addressbook 경로 제외 (테스트용)
+            # "/api/v1/addressbook",  # 주석 처리: 조직 ID가 필요한 엔드포인트이므로 테넌트 검증 필요
             "/api/v1/test-csv"      # 임시로 test-csv 경로 제외 (테스트용)
         ]
         self.default_org_code = default_org_code

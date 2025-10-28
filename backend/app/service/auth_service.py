@@ -266,6 +266,7 @@ class AuthService:
                 "is_admin": user.role in ["admin", "system_admin"],
                 "role": user.role,
                 "org_id": user.org_id,
+                "org_code": organization.org_code if organization else None,
                 "org_name": organization.name if organization else None,
                 "org_domain": organization.domain if organization else None
             }

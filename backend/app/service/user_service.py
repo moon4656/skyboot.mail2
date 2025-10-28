@@ -90,7 +90,21 @@ class UserService:
                     detail=f"조직의 최대 사용자 수({org.max_users})에 도달했습니다."
                 )
             
-            # 3. 이메일 중복 확인 (조직 내)
+            # 3. 사용자 ID 중복 확인 (조직 내)
+            existing_user_id = self.db.query(User).filter(
+                and_(
+                    User.org_id == org_id,
+                    User.user_id == user_data.user_id
+                )
+            ).first()
+            
+            if existing_user_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"사용자 ID '{user_data.user_id}'가 이미 사용 중입니다."
+                )
+            
+            # 4. 이메일 중복 확인 (조직 내)
             existing_email = self.db.query(User).filter(
                 and_(
                     User.org_id == org_id,
@@ -104,7 +118,7 @@ class UserService:
                     detail=f"이메일 '{user_data.email}'이 이미 사용 중입니다."
                 )
             
-            # 4. 사용자명 중복 확인 (조직 내)
+            # 5. 사용자명 중복 확인 (조직 내)
             existing_username = self.db.query(User).filter(
                 and_(
                     User.org_id == org_id,
@@ -118,12 +132,12 @@ class UserService:
                     detail=f"사용자명 '{user_data.username}'이 이미 사용 중입니다."
                 )
             
-            # 5. 사용자 생성
+            # 6. 사용자 생성
             user_uuid = str(uuid.uuid4())
             password_hash = AuthService.get_password_hash(user_data.password)
             
             new_user = User(
-                user_id=user_data.user_id,  # UUID로 ID 생성
+                user_id=user_data.user_id,  # 사용자가 입력한 ID 사용
                 user_uuid=user_uuid,
                 org_id=org_id,
                 username=user_data.username,
@@ -140,7 +154,7 @@ class UserService:
             
             logger.info(f"✅ 사용자 생성 완료: {new_user.email} (ID: {new_user.user_id})")
             
-            # 6. 메일 사용자 생성
+            # 7. 메일 사용자 생성
             await self._create_mail_user(
                 user_id=new_user.user_id,
                 org_id=org_id,
@@ -148,7 +162,7 @@ class UserService:
                 password_hash=password_hash
             )
             
-            # 7. 조직 사용량 업데이트 (사용자 수 증가)
+            # 8. 조직 사용량 업데이트 (사용자 수 증가)
             await self._update_organization_usage_users(org_id)
             
             self.db.commit()

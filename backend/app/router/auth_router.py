@@ -227,6 +227,7 @@ async def login_with_2fa(
 async def register(
     user_data: UserCreate, 
     request: Request,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ) -> UserResponse:
     """
@@ -234,50 +235,97 @@ async def register(
     조직 내에서 사용자를 생성합니다.
     """
     
-    # 조직 정보를 request.state에서 가져오기 (tenant_middleware에서 설정됨)
-    try:
-        org_code = getattr(request.state, 'org_code', None)
-        org_id = getattr(request.state, 'org_id', None)
-        organization = getattr(request.state, 'organization', None)
-    except AttributeError:
-        org_code = None
-        org_id = None
-        organization = None
+    # # 조직 정보를 request.state에서 가져오기 (tenant_middleware에서 설정됨)
+    # try:
+    #     org_code = getattr(request.state, 'org_code', None)
+    #     org_id = getattr(request.state, 'org_id', None)
+    #     organization = getattr(request.state, 'organization', None)
+    # except AttributeError:
+    #     org_code = None
+    #     org_id = None
+    #     organization = None
     
-    logger.debug(f"📨 request.state 정보: org_code={org_code}, org_id={org_id}")
-    logger.debug(f"📨 organization 정보: {organization}")
+    # # request.state 내용을 출력 (값이 있는 속성만)
+    # state_attrs = []
+    # for attr in dir(request.state):
+    #     if not attr.startswith("_"):
+    #         value = getattr(request.state, attr, None)
+    #         if value is not None:
+    #             state_attrs.append(f"{attr}: {value}")
     
-    # tenant_middleware에서 조직 정보가 설정되지 않은 경우 기본 조직 찾기
-    if not org_id or not org_code:
-        from app.model.organization_model import Organization
-        
-        # 기본 조직 코드로 찾기
-        default_org = db.query(Organization).filter(
-            Organization.org_code == "default",
-            Organization.deleted_at.is_(None)
-        ).first()
-        
-        # 기본 조직이 없으면 첫 번째 활성 조직 사용
-        if not default_org:
-            default_org = db.query(Organization).filter(
-                Organization.deleted_at.is_(None),
-                Organization.is_active == True
-            ).first()
-        
-        if default_org:
-            org_id = default_org.org_id
-            org_code = default_org.org_code
-            logger.info(f"🏠 기본 조직 사용: {org_code} (ID: {org_id})")
-        else:
-            raise HTTPException(
-                status_code=404, 
-                detail={
-                    "error": "ORGANIZATION_NOT_FOUND",
-                    "message": "조직을 찾을 수 없습니다.",
-                    "path": "/auth/register"
-                }
-            )
+    # if state_attrs:
+    #     logger.info("📦 request.state 속성 (값이 있는 것만):")
+    #     for attr_info in state_attrs:
+    #         logger.info(f"  - {attr_info}")
+    # else:
+    #     logger.info("📦 request.state에 설정된 속성이 없습니다 (tenant_middleware 제외 경로)")
     
+    
+    # tenant_middleware가 제외 경로로 처리한 경우, 헤더에서 조직 코드 직접 읽기 또는 기본 조직 사용
+    # org_code = current_user.org_code
+    org_id = current_user.org_id    
+    
+    # from app.model.organization_model import Organization
+    
+    # header_org_code = request.headers.get("X-Org-Code")
+    # if header_org_code:
+    #     logger.info(f"🔍 헤더에서 조직 코드 발견: {header_org_code}")
+        
+    #     # 헤더의 조직 코드로 조직 정보 조회
+    #     header_org = db.query(Organization).filter(
+    #         Organization.org_code == header_org_code,
+    #         Organization.deleted_at.is_(None)
+    #     ).first()
+        
+    #     if not header_org:
+    #         logger.error(f"❌ 조직 코드 '{header_org_code}'를 찾을 수 없습니다.")
+    #         raise HTTPException(
+    #             status_code=404,
+    #             detail=f"조직 코드 '{header_org_code}'를 찾을 수 없습니다."
+    #         )
+        
+    #     # 조직 정보 설정
+    #     org_code = header_org.org_code
+    #     org_id = header_org.org_id
+    #     logger.info(f"✅ 헤더 조직 정보 설정: {org_code} (ID: {org_id})")
+    # else:
+    #     logger.info("🏠 X-Org-Code 헤더가 없음 - 기본 조직 사용")
+        
+    #     # 기본 조직 코드로 찾기
+    #     default_org = db.query(Organization).filter(
+    #         Organization.org_code == "default",
+    #         Organization.deleted_at.is_(None)
+    #     ).first()
+        
+    #     # 기본 조직이 없으면 첫 번째 활성 조직 사용
+    #     if not default_org:
+    #         default_org = db.query(Organization).filter(
+    #             Organization.deleted_at.is_(None),
+    #             Organization.is_active == True
+    #         ).first()
+        
+    #     if default_org:
+    #         org_id = default_org.org_id
+    #         org_code = default_org.org_code
+    #         logger.info(f"✅ 기본 조직 사용: {org_code} (ID: {org_id})")
+    #     else:
+    #         logger.error("❌ 사용 가능한 조직을 찾을 수 없습니다.")
+    #         raise HTTPException(
+    #             status_code=404, 
+    #             detail="사용 가능한 조직을 찾을 수 없습니다."
+    #         )
+        
+    # logger.debug(f"📨 request.state 정보: org_code={org_code}, org_id={org_id}")
+    # logger.debug(f"📨 organization 정보: {organization}")
+    
+    # 요청 데이터 상세 로깅 추가
+    logger.info(f"🔍 회원가입 요청 데이터 분석:")
+    logger.info(f"  - username: '{user_data.username}'")
+    logger.info(f"  - email: '{user_data.email}'")
+    logger.info(f"  - full_name: '{user_data.full_name}'")
+    # logger.info(f"  - org_code: '{org_code}'")
+    logger.info(f"  - org_id: '{org_id}'")
+        
     logger.info(f"📝 사용자 등록 시작 - 조직: {org_id}, 이메일: {user_data.email}")
     
     try:
@@ -309,9 +357,10 @@ async def register(
         
         # user_id를 자동 생성 (조직코드 + 사용자명 조합)
         # user_id = f"{org_code}_{user_data.username}"
+        user_id = user_data.user_id
         
         new_user = User(
-            user_id=user_data.user_id,
+            user_id=user_id,
             user_uuid=user_uuid,
             org_id=org_id,
             email=user_data.email,
@@ -329,7 +378,7 @@ async def register(
         # 메일 사용자도 함께 생성
         from app.model.mail_model import MailUser
         mail_user = MailUser(
-            user_id=new_user.user_id,
+            user_id=new_user.user_uuid,
             user_uuid=new_user.user_uuid,
             org_id=new_user.org_id,
             email=new_user.email,
@@ -339,7 +388,7 @@ async def register(
         db.add(mail_user)
         db.commit()
         
-        logger.info(f"✅ 사용자 등록 완료 - 조직: {org_code}, 사용자: {new_user.user_id}, 메일 사용자 생성 완료")
+        logger.info(f"✅ 사용자 등록 완료 - 조직: {org_id}, 사용자: {new_user.user_id}, 메일 사용자 생성 완료")
         
         return UserResponse(
             user_id=new_user.user_id,
@@ -800,7 +849,7 @@ async def get_roles(
         rbac_service = RBACService(db)
         
         # 권한 확인 (관리자만 모든 역할 조회 가능)
-        if current_user.role not in ["super_admin", "org_admin"]:
+        if current_user.role not in ["super_admin", "org_admin", "system_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="역할 정보를 조회할 권한이 없습니다"
@@ -843,7 +892,7 @@ async def get_role_info(
         rbac_service = RBACService(db)
         
         # 권한 확인
-        if current_user.role not in ["super_admin", "org_admin"]:
+        if current_user.role not in ["super_admin", "org_admin", "system_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="역할 정보를 조회할 권한이 없습니다"
@@ -888,11 +937,14 @@ async def update_user_role(
         rbac_service = RBACService(db)
         
         # 대상 사용자 조회
-        target_user = db.query(User).filter(User.user_uuid == user_id).first()
+        target_user = db.query(User).filter(
+            User.user_id == user_id,
+            User.org_id == current_user.org_id
+        ).first()
         if not target_user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="사용자를 찾을 수 없습니다"
+                detail="해당 조직 내 사용자를 찾을 수 없습니다"
             )
         
         # 역할 업데이트
@@ -934,7 +986,7 @@ async def get_organization_users(
         rbac_service = RBACService(db)
         
         # 권한 확인
-        if current_user.role not in ["super_admin", "org_admin", "user_manager"]:
+        if current_user.role not in ["super_admin", "org_admin", "user_manager", "system_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="사용자 목록을 조회할 권한이 없습니다"
@@ -991,7 +1043,7 @@ async def get_role_statistics(
         rbac_service = RBACService(db)
         
         # 권한 확인
-        if current_user.role not in ["super_admin", "org_admin"]:
+        if current_user.role not in ["super_admin", "org_admin", "system_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="역할 통계를 조회할 권한이 없습니다"
@@ -1107,7 +1159,7 @@ async def get_rate_limit_config(
     
     try:
         # 권한 확인
-        if current_user.role not in ["super_admin", "org_admin"]:
+        if current_user.role not in ["super_admin", "org_admin", "system_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="속도 제한 설정을 조회할 권한이 없습니다"
@@ -1252,7 +1304,7 @@ async def reset_rate_limit(
     
     try:
         # 권한 확인
-        if current_user.role not in ["super_admin", "org_admin"]:
+        if current_user.role not in ["super_admin", "org_admin", "system_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="속도 제한을 리셋할 권한이 없습니다"
@@ -1317,7 +1369,7 @@ async def get_rate_limit_violations(
     
     try:
         # 권한 확인
-        if current_user.role not in ["super_admin", "org_admin"]:
+        if current_user.role not in ["super_admin", "org_admin", "system_admin"]:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="속도 제한 위반 로그를 조회할 권한이 없습니다"
