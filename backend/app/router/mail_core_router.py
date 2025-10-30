@@ -19,12 +19,13 @@ from ..model import Organization
 from ..schemas.mail_schema import (
     APIResponse,
     MailSendRequest,
-    MailResponse,
     MailListResponse,
     MailSendResponse,
     MailDetailResponse,
     MailListWithPaginationResponse,
     MailUserResponse,
+    RecipientResponse,
+    AttachmentResponse,
     PaginationResponse,
     RecipientType,
     MailStatus,
@@ -608,12 +609,11 @@ async def send_mail(
                 total_mail_size_mb = total_mail_bytes / (1024 * 1024)
                 
                 # MailService 인스턴스 생성 및 저장 용량 업데이트
-                mail_service = MailService()
+                mail_service = MailService(db=db)
                 await mail_service._update_user_storage_usage(
-                    db=db,
-                    user_uuid=mail_user.user_uuid,
                     org_id=current_org_id,
-                    size_mb=total_mail_size_mb,
+                    user_uuid=mail_user.user_uuid,
+                    storage_size_mb=total_mail_size_mb,
                     operation='add'
                 )
                 
@@ -1197,7 +1197,7 @@ async def get_inbox_mail_detail(
                 "content_type": attachment.content_type
             })
         
-        # 현재 사용자의 수신자 레코드 찾기 (조직별 격리)
+        # 현재 사용자의 메일-폴더 관계 찾기 (조직별 격리)
         mail_user = db.query(MailUser).filter(
             MailUser.email == current_user.email,
             MailUser.org_id == current_org_id
@@ -1205,18 +1205,20 @@ async def get_inbox_mail_detail(
         if not mail_user:
             raise HTTPException(status_code=404, detail="조직 내에서 메일 사용자를 찾을 수 없습니다")
         
-        current_recipient = db.query(MailRecipient).filter(
-            MailRecipient.mail_uuid == mail.mail_uuid,  
-            MailRecipient.recipient_uuid == mail_user.user_uuid
+        # 현재 사용자의 받은편지함에서 해당 메일 찾기
+        mail_in_folder = db.query(MailInFolder).filter(
+            MailInFolder.mail_uuid == mail.mail_uuid,  
+            MailInFolder.user_uuid == mail_user.user_uuid
         ).first()
         
         read_at = None
-        if current_recipient:
+        if mail_in_folder:
             # 읽음 처리
-            if not current_recipient.read_at:
-                current_recipient.read_at = datetime.utcnow()
+            if not mail_in_folder.is_read:
+                mail_in_folder.is_read = True
+                mail_in_folder.read_at = datetime.utcnow()
                 db.commit()
-            read_at = current_recipient.read_at
+            read_at = mail_in_folder.read_at
         
         logger.info(f"✅ get_inbox_mail_detail 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일UUID: {mail_uuid}")
         
@@ -1375,6 +1377,8 @@ async def get_sent_mail_detail(
         if not mail_user:
             raise HTTPException(status_code=404, detail="해당 조직에서 메일 사용자를 찾을 수 없습니다")
         
+        logger.info(f"🔍 mail_user 정보: {mail_user.__dict__}")
+        
         # 메일 조회 (조직별 필터링)
         mail = db.query(Mail).filter(
             and_(
@@ -1455,6 +1459,8 @@ async def get_draft_mails(
         if not mail_user:
             raise HTTPException(status_code=404, detail="해당 조직에서 메일 사용자를 찾을 수 없습니다")
         
+        logger.info(f"🔍 임시보관함 mail_user 정보: {mail_user.__dict__}")
+        
         # 기본 쿼리 - 임시보관 상태인 메일 (조직별 필터링)
         query = db.query(Mail).filter(
             and_(
@@ -1482,27 +1488,49 @@ async def get_draft_mails(
         
         # 응답 데이터 구성
         mail_list = []
-        for mail in mails:
+        logger.info(f"🔍 임시보관함 메일 개수: {len(mails)}")
+        
+        for i, mail in enumerate(mails):
+            logger.info(f"🔍 메일 {i+1} 처리 시작 - mail_uuid: {mail.mail_uuid}")
+            
             # 수신자 정보
             recipients = db.query(MailRecipient).filter(MailRecipient.mail_uuid == mail.mail_uuid).all()
-            to_emails = [r.recipient_email for r in recipients if r.recipient_type == RecipientType.TO]
+            recipient_count = len(recipients)
+            logger.info(f"🔍 수신자 개수: {recipient_count}")
             
             # 첨부파일 개수
             attachment_count = db.query(MailAttachment).filter(MailAttachment.mail_uuid == mail.mail_uuid).count()
+            logger.info(f"🔍 첨부파일 개수: {attachment_count}")
             
-            mail_response = MailResponse(
+            # 발송자 정보
+            logger.info(f"🔍 발송자 정보 생성 시작")
+            sender_response = MailUserResponse(
+                user_uuid=mail_user.user_uuid,
+                email=mail_user.email,
+                display_name=mail_user.display_name,
+                is_active=mail_user.is_active,
+                created_at=mail_user.created_at,
+                updated_at=mail_user.updated_at
+            )
+            logger.info(f"🔍 발송자 정보 생성 완료")
+            
+            logger.info(f"🔍 MailListResponse 생성 시작")
+            mail_response = MailListResponse(
                 mail_uuid=mail.mail_uuid,
                 subject=mail.subject or "(제목 없음)",
-                sender_email=mail_user.email,
-                to_emails=to_emails,
                 status=mail.status,
+                is_draft=True,  # 임시보관함이므로 True
                 priority=mail.priority,
-                has_attachments=attachment_count > 0,
-                created_at=mail.created_at,
                 sent_at=mail.sent_at,
-                read_at=None  # Mail 모델에는 read_at 필드가 없음
+                created_at=mail.created_at,
+                sender=sender_response,
+                recipient_count=recipient_count,
+                attachment_count=attachment_count,
+                is_read=None  # 임시보관함에서는 읽음 상태가 의미 없음
             )
+            logger.info(f"🔍 MailListResponse 생성 완료")
             mail_list.append(mail_response)
+            logger.info(f"🔍 메일 {i+1} 처리 완료")
         
         # 페이지네이션 정보
         total_pages = (total_count + limit - 1) // limit

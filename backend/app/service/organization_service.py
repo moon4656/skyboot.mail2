@@ -238,7 +238,7 @@ class OrganizationService:
                 logger.warning(f"⚠️ get_organization - 조직을 찾을 수 없음: {org_id}")
                 return None
             
-            # 설정을 딕셔너리로 변환 (핵심 조직 필드 제외)
+            # 설정을 딕셔너리로 변환 (핵심 조직 필드 제외 + 허용된 키만 포함)
             settings_dict = {}
             # 핵심 조직 필드들 (settings에서 제외해야 할 키들)
             core_org_fields = {
@@ -247,21 +247,54 @@ class OrganizationService:
                 'admin_email', 'created_at', 'updated_at'
             }
             
+            # 허용된 설정 키 목록 (organization_schema.py와 동일)
+            allowed_keys = {
+                'mail_retention_days',
+                'max_attachment_size_mb',
+                'max_mail_size_mb',
+                'max_emails_per_day',
+                'enable_spam_filter',
+                'enable_virus_scan',
+                'enable_encryption',
+                'backup_enabled',
+                'backup_retention_days',
+                'notification_settings',
+                'security_settings',
+                'feature_flags',
+                'features',           # 추가된 키
+                'theme',              # 추가된 키
+                'power',              # 전력/성능 관련 설정
+                'imap_enabled',       # IMAP 서버 활성화 설정
+                'smtp_enabled',       # SMTP 서버 활성화 설정
+                'mail_server_enabled' # 메일 서버 전체 활성화 설정
+            }
+            
             if hasattr(org, 'settings') and org.settings:
                 # org.settings가 리스트인 경우 (OrganizationSettings 객체들)
                 if isinstance(org.settings, list):
                     for setting in org.settings:
-                        if setting.setting_key not in core_org_fields:
+                        if (setting.setting_key not in core_org_fields and 
+                            setting.setting_key in allowed_keys):
                             settings_dict[setting.setting_key] = setting.setting_value
+                            logger.debug(f"✅ 허용된 설정 키 포함: {setting.setting_key}")
+                        elif setting.setting_key not in core_org_fields:
+                            logger.warning(f"⚠️ 허용되지 않은 설정 키 무시: {setting.setting_key}")
                 # org.settings가 단일 객체인 경우
                 elif hasattr(org.settings, 'setting_key'):
-                    if org.settings.setting_key not in core_org_fields:
+                    if (org.settings.setting_key not in core_org_fields and 
+                        org.settings.setting_key in allowed_keys):
                         settings_dict[org.settings.setting_key] = org.settings.setting_value
+                        logger.debug(f"✅ 허용된 설정 키 포함: {org.settings.setting_key}")
+                    elif org.settings.setting_key not in core_org_fields:
+                        logger.warning(f"⚠️ 허용되지 않은 설정 키 무시: {org.settings.setting_key}")
                 # org.settings가 이미 딕셔너리인 경우
                 elif isinstance(org.settings, dict):
                     for key, value in org.settings.items():
-                        if key not in core_org_fields:
+                        if key not in core_org_fields and key in allowed_keys:
                             settings_dict[key] = value
+                            logger.debug(f"✅ 허용된 설정 키 포함: {key}")
+                        elif key not in core_org_fields:
+                            logger.warning(f"⚠️ 허용되지 않은 설정 키 무시: {key}")
             
             return OrganizationResponse(
                 org_id=org.org_id,
@@ -313,7 +346,7 @@ class OrganizationService:
                 logger.warning(f"⚠️ get_organization_by_id - 조직을 찾을 수 없음: {org_id}")
                 return None
             
-            # 설정을 딕셔너리로 변환 (핵심 조직 필드 제외)
+            # 설정을 딕셔너리로 변환 (핵심 조직 필드 제외 + 허용된 키만 포함)
             settings_dict = {}
             # 핵심 조직 필드들 (settings에서 제외해야 할 키들)
             core_org_fields = {
@@ -322,21 +355,36 @@ class OrganizationService:
                 'admin_email', 'created_at', 'updated_at'
             }
             
+            # 허용된 설정 키들 (OrganizationBase.validate_settings와 동일)
+            allowed_keys = {
+                'feature_flags', 'features', 'theme', 'power', 
+                'imap_enabled', 'smtp_enabled', 'mail_server_enabled'
+            }
+            
             if hasattr(org, 'settings') and org.settings:
                 # org.settings가 리스트인 경우 (OrganizationSettings 객체들)
                 if isinstance(org.settings, list):
                     for setting in org.settings:
-                        if setting.setting_key not in core_org_fields:
+                        if setting.setting_key not in core_org_fields and setting.setting_key in allowed_keys:
                             settings_dict[setting.setting_key] = setting.setting_value
+                            logger.debug(f"🔧 get_organization_by_id - 포함된 설정: {setting.setting_key} = {setting.setting_value}")
+                        elif setting.setting_key not in core_org_fields:
+                            logger.warning(f"⚠️ get_organization_by_id - 허용되지 않은 설정 키 무시: {setting.setting_key}")
                 # org.settings가 단일 객체인 경우
                 elif hasattr(org.settings, 'setting_key'):
-                    if org.settings.setting_key not in core_org_fields:
+                    if org.settings.setting_key not in core_org_fields and org.settings.setting_key in allowed_keys:
                         settings_dict[org.settings.setting_key] = org.settings.setting_value
+                        logger.debug(f"🔧 get_organization_by_id - 포함된 설정: {org.settings.setting_key} = {org.settings.setting_value}")
+                    elif org.settings.setting_key not in core_org_fields:
+                        logger.warning(f"⚠️ get_organization_by_id - 허용되지 않은 설정 키 무시: {org.settings.setting_key}")
                 # org.settings가 이미 딕셔너리인 경우
                 elif isinstance(org.settings, dict):
                     for key, value in org.settings.items():
-                        if key not in core_org_fields:
+                        if key not in core_org_fields and key in allowed_keys:
                             settings_dict[key] = value
+                            logger.debug(f"🔧 get_organization_by_id - 포함된 설정: {key} = {value}")
+                        elif key not in core_org_fields:
+                            logger.warning(f"⚠️ get_organization_by_id - 허용되지 않은 설정 키 무시: {key}")
             
             return OrganizationResponse(
                 org_id=org.org_id,
@@ -399,30 +447,42 @@ class OrganizationService:
             
             result = []
             for org in orgs:
-                # 설정을 딕셔너리로 변환
+                # 설정을 딕셔너리로 변환 (핵심 조직 필드 제외 + 허용된 키만 포함)
                 settings_dict = {}
-                # settings에서 제외해야 할 핵심 조직 필드들 (스키마 검증 충돌 방지)
+                # settings에서 제외해야 핵심 조직 필드들 (스키마 검증 충돌 방지)
                 core_org_fields = {
                     'max_users', 'max_storage_gb', 'timezone', 'name', 'domain', 
                     'description', 'is_active', 'org_id', 'org_code', 'subdomain',
                     'admin_email', 'created_at', 'updated_at'
+                }
+                
+                # 허용된 설정 키들 (OrganizationBase.validate_settings와 동일)
+                allowed_keys = {
+                    'feature_flags', 'features', 'theme', 'power', 
+                    'imap_enabled', 'smtp_enabled', 'mail_server_enabled'
                 }
 
                 if hasattr(org, 'settings') and org.settings:
                     # org.settings가 리스트인 경우 (OrganizationSettings 객체들)
                     if isinstance(org.settings, list):
                         for setting in org.settings:
-                            if setting.setting_key not in core_org_fields:
+                            if setting.setting_key not in core_org_fields and setting.setting_key in allowed_keys:
                                 settings_dict[setting.setting_key] = setting.setting_value
+                            elif setting.setting_key not in core_org_fields:
+                                logger.warning(f"⚠️ list_organizations - 허용되지 않은 설정 키 무시: {setting.setting_key}")
                     # org.settings가 단일 객체인 경우
                     elif hasattr(org.settings, 'setting_key'):
-                        if org.settings.setting_key not in core_org_fields:
+                        if org.settings.setting_key not in core_org_fields and org.settings.setting_key in allowed_keys:
                             settings_dict[org.settings.setting_key] = org.settings.setting_value
+                        elif org.settings.setting_key not in core_org_fields:
+                            logger.warning(f"⚠️ list_organizations - 허용되지 않은 설정 키 무시: {org.settings.setting_key}")
                     # org.settings가 이미 딕셔너리인 경우
                     elif isinstance(org.settings, dict):
                         for key, value in org.settings.items():
-                            if key not in core_org_fields:
+                            if key not in core_org_fields and key in allowed_keys:
                                 settings_dict[key] = value
+                            elif key not in core_org_fields:
+                                logger.warning(f"⚠️ list_organizations - 허용되지 않은 설정 키 무시: {key}")
                 
                 result.append(OrganizationResponse(
                     org_id=org.org_id,
@@ -590,11 +650,43 @@ class OrganizationService:
                 )
             
             if force:
-                # 하드 삭제 - 모든 관련 데이터 삭제
+                # 하드 삭제 - CASCADE 설정을 활용하여 관련 데이터 자동 삭제
                 logger.warning(f"🗑️ 조직 하드 삭제 시작: {org.name} (ID: {org.org_id})")
                 
-                # 관련 데이터 삭제는 외래 키 CASCADE로 처리됨
-                self.db.delete(org)
+                # 조직 이름과 ID를 미리 저장 (세션 종료 후 접근 불가)
+                org_name = org.name
+                org_uuid = org.org_id
+                
+                # 현재 세션 완전히 종료
+                self.db.close()
+                
+                # 완전히 새로운 세션으로 조직 삭제 (CASCADE 활용)
+                from app.database.mail import get_db
+                from sqlalchemy import text
+                
+                new_db = next(get_db())
+                try:
+                    result = new_db.execute(
+                        text("DELETE FROM organizations WHERE org_id = :org_id"),
+                        {"org_id": org_uuid}
+                    )
+                    new_db.commit()
+                    
+                    if result.rowcount > 0:
+                        logger.info(f"🗑️ 조직 삭제 완료 (CASCADE로 관련 데이터 자동 삭제): {org_name}")
+                    else:
+                        logger.warning(f"⚠️ 삭제할 조직을 찾을 수 없음: {org_uuid}")
+                        
+                except Exception as e:
+                    new_db.rollback()
+                    logger.error(f"❌ 조직 삭제 중 오류 발생: {e}")
+                    raise
+                finally:
+                    new_db.close()
+                
+                # 하드 삭제 완료 - 기존 세션 commit 하지 않음
+                logger.info(f"✅ 조직 삭제 완료: {org_name}")
+                return True
                 
             else:
                 # 소프트 삭제 - 비활성화
@@ -602,8 +694,9 @@ class OrganizationService:
                 org.is_active = False
                 org.updated_at = datetime.now(timezone.utc)
                 org.deleted_at = datetime.now(timezone.utc)
-            
-            self.db.commit()
+                
+                # 소프트 삭제만 기존 세션에서 commit
+                self.db.commit()
             
             logger.info(f"✅ 조직 삭제 완료: {org.name}")
             return True
@@ -848,6 +941,7 @@ class OrganizationService:
             ).first()
             
             if not org:
+                logger.warning(f"⚠️ 조직을 찾을 수 없음: {org_id}")
                 return None
             
             # 업데이트할 설정 적용 - Pydantic 모델인지 딕셔너리인지 확인
@@ -860,58 +954,109 @@ class OrganizationService:
             
             logger.info(f"🔧 조직 설정 업데이트 데이터: {update_data}")
             
-            # 각 설정을 OrganizationSettings 테이블에 저장/업데이트
+            # 허용된 설정 키 목록 (organization_schema.py와 동일하게 유지)
+            allowed_keys = {
+                'mail_retention_days',
+                'max_attachment_size_mb',
+                'max_mail_size_mb',
+                'max_mailbox_size_mb',
+                'enable_spam_filter',
+                'enable_virus_scan',
+                'enable_encryption',
+                'backup_enabled',
+                'backup_retention_days',
+                'notification_settings',
+                'security_settings',
+                'feature_flags',
+                'features',
+                'theme',
+                'power',
+                'imap_enabled',
+                'smtp_enabled',
+                'mail_server_enabled'
+            }
+            
+            # 허용되지 않은 키 사전 필터링
+            filtered_data = {}
+            invalid_keys = []
+            
             for setting_key, setting_value in update_data.items():
-                # 특수 키 처리: 조직 컬럼에 저장되는 값
-                if setting_key == "max_emails_per_day":
-                    try:
-                        org.max_emails_per_day = int(setting_value)
-                        logger.info(f"🔧 조직 필드 업데이트: max_emails_per_day = {org.max_emails_per_day}")
-                    except Exception as conv_err:
-                        logger.warning(f"⚠️ max_emails_per_day 변환 오류: {str(conv_err)}")
-                    # settings 테이블에는 저장하지 않음
-                    continue
-                # 기존 설정 찾기
-                existing_setting = self.db.query(OrganizationSettings).filter(
-                    OrganizationSettings.org_id == org_id,
-                    OrganizationSettings.setting_key == setting_key
-                ).first()
-                
-                # 값의 타입에 따라 적절히 변환
-                if isinstance(setting_value, (dict, list)):
-                    # JSON 타입의 경우 JSON 문자열로 변환
-                    setting_value_str = json.dumps(setting_value, ensure_ascii=False)
-                    setting_type = "json"
-                elif isinstance(setting_value, bool):
-                    setting_value_str = str(setting_value).lower()
-                    setting_type = "boolean"
-                elif isinstance(setting_value, int):
-                    setting_value_str = str(setting_value)
-                    setting_type = "integer"
-                elif isinstance(setting_value, float):
-                    setting_value_str = str(setting_value)
-                    setting_type = "float"
+                if setting_key in allowed_keys or setting_key == "max_emails_per_day":
+                    filtered_data[setting_key] = setting_value
                 else:
-                    setting_value_str = str(setting_value)
+                    invalid_keys.append(setting_key)
+                    logger.warning(f"⚠️ 허용되지 않은 설정 키 무시: {setting_key}")
+            
+            if invalid_keys:
+                logger.warning(f"⚠️ 무시된 설정 키들: {invalid_keys}")
+            
+            # 각 설정을 OrganizationSettings 테이블에 저장/업데이트
+            for setting_key, setting_value in filtered_data.items():
+                try:
+                    # 특수 키 처리: 조직 컬럼에 저장되는 값
+                    if setting_key == "max_emails_per_day":
+                        try:
+                            org.max_emails_per_day = int(setting_value)
+                            logger.info(f"🔧 조직 필드 업데이트: max_emails_per_day = {org.max_emails_per_day}")
+                        except (ValueError, TypeError) as conv_err:
+                            logger.warning(f"⚠️ max_emails_per_day 변환 오류: {str(conv_err)}, 기존 값 유지")
+                        # settings 테이블에는 저장하지 않음
+                        continue
+                    
+                    # 기존 설정 찾기
+                    existing_setting = self.db.query(OrganizationSettings).filter(
+                        OrganizationSettings.org_id == org_id,
+                        OrganizationSettings.setting_key == setting_key
+                    ).first()
+                    
+                    # 값의 타입에 따라 적절히 변환 (안전한 변환)
+                    setting_value_str = None
                     setting_type = "string"
-                
-                if existing_setting:
-                    # 기존 설정 업데이트
-                    existing_setting.setting_value = setting_value_str
-                    existing_setting.setting_type = setting_type
-                    existing_setting.updated_at = datetime.now(timezone.utc)
-                    logger.info(f"🔄 설정 업데이트: {setting_key} = {setting_value_str}")
-                else:
-                    # 새 설정 생성
-                    new_setting = OrganizationSettings(
-                        org_id=org_id,
-                        setting_key=setting_key,
-                        setting_value=setting_value_str,
-                        setting_type=setting_type,
-                        created_at=datetime.now(timezone.utc)
-                    )
-                    self.db.add(new_setting)
-                    logger.info(f"➕ 새 설정 생성: {setting_key} = {setting_value_str}")
+                    
+                    try:
+                        if isinstance(setting_value, (dict, list)):
+                            # JSON 타입의 경우 JSON 문자열로 변환
+                            setting_value_str = json.dumps(setting_value, ensure_ascii=False)
+                            setting_type = "json"
+                        elif isinstance(setting_value, bool):
+                            setting_value_str = str(setting_value).lower()
+                            setting_type = "boolean"
+                        elif isinstance(setting_value, int):
+                            setting_value_str = str(setting_value)
+                            setting_type = "integer"
+                        elif isinstance(setting_value, float):
+                            setting_value_str = str(setting_value)
+                            setting_type = "float"
+                        else:
+                            setting_value_str = str(setting_value)
+                            setting_type = "string"
+                    except Exception as type_err:
+                        logger.warning(f"⚠️ 설정 값 타입 변환 오류 - {setting_key}: {str(type_err)}, 문자열로 처리")
+                        setting_value_str = str(setting_value)
+                        setting_type = "string"
+                    
+                    if existing_setting:
+                        # 기존 설정 업데이트
+                        existing_setting.setting_value = setting_value_str
+                        existing_setting.setting_type = setting_type
+                        existing_setting.updated_at = datetime.now(timezone.utc)
+                        logger.info(f"🔄 설정 업데이트: {setting_key} = {setting_value_str}")
+                    else:
+                        # 새 설정 생성
+                        new_setting = OrganizationSettings(
+                            org_id=org_id,
+                            setting_key=setting_key,
+                            setting_value=setting_value_str,
+                            setting_type=setting_type,
+                            created_at=datetime.now(timezone.utc)
+                        )
+                        self.db.add(new_setting)
+                        logger.info(f"➕ 새 설정 생성: {setting_key} = {setting_value_str}")
+                        
+                except Exception as setting_err:
+                    logger.error(f"❌ 설정 처리 오류 - {setting_key}: {str(setting_err)}")
+                    # 개별 설정 오류는 전체 처리를 중단하지 않고 계속 진행
+                    continue
             
             # 조직 업데이트 시간 갱신
             org.updated_at = datetime.now(timezone.utc)
@@ -926,6 +1071,7 @@ class OrganizationService:
         except Exception as e:
             self.db.rollback()
             logger.error(f"❌ 조직 설정 수정 오류: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
     
     async def _create_admin_user(

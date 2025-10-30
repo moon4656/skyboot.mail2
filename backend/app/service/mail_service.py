@@ -45,11 +45,23 @@ class MailService:
     
     def __init__(self, db: Optional[Session] = None):
         self.db = db
-        self.smtp_server = os.getenv("SMTP_HOST", "localhost")
-        self.smtp_port = int(os.getenv("SMTP_PORT", "25"))
-        self.smtp_username = os.getenv("SMTP_USERNAME", "")
-        self.smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self.use_tls = os.getenv("SMTP_USE_TLS", "false").lower() == "true"
+        
+        # config.py의 get_smtp_config() 사용
+        from app.config import settings
+        smtp_config = settings.get_smtp_config()
+        
+        # self.smtp_server = os.getenv("SMTP_HOST", "localhost")
+        # self.smtp_port = int(os.getenv("SMTP_PORT", "25"))
+        # self.smtp_username = os.getenv("SMTP_USERNAME", "")
+        # self.smtp_password = os.getenv("SMTP_PASSWORD", "")
+        # self.use_tls = os.getenv("SMTP_USE_TLS", "false").lower() == "true"        
+        
+        self.smtp_server = smtp_config["host"]
+        self.smtp_port = smtp_config["port"]
+        self.smtp_username = smtp_config["user"]
+        self.smtp_password = smtp_config["password"]
+        # Gmail SMTP는 기본적으로 TLS 사용
+        self.use_tls = self.smtp_server == "smtp.gmail.com" or os.getenv("SMTP_USE_TLS", "false").lower() == "true"
         
         # SMTP 설정 로깅
         logger.info(f"🔧 SMTP 설정 로드 - 서버: {self.smtp_server}:{self.smtp_port}, TLS: {self.use_tls}")
@@ -285,9 +297,21 @@ class MailService:
             attachments: 첨부파일 목록
         """
         try:
+            logger.info(f"🚀 _send_smtp_mail 메서드 호출됨")
+            logger.info(f"🔍 SMTP 설정 확인 - 서버: {self.smtp_server}, 사용자: {self.smtp_username}")
+            logger.info(f"🔍 발송자: {sender_email}, 수신자: {recipients}")
+            
+            # Gmail SMTP 사용 시 발신자 주소 강제 변경
+            actual_sender = sender_email
+            if self.smtp_server == "smtp.gmail.com" and self.smtp_username:
+                logger.info(f"🔄 Gmail SMTP 감지 - 발신자 주소 변경: {sender_email} → {self.smtp_username}")
+                actual_sender = self.smtp_username
+            else:
+                logger.info(f"🔍 Gmail SMTP 아님 - 서버: {self.smtp_server}, 발신자 유지: {sender_email}")
+            
             # MIME 메시지 생성
             msg = MIMEMultipart()
-            msg['From'] = sender_email
+            msg['From'] = actual_sender
             msg['To'] = ', '.join(recipients)
             msg['Subject'] = subject
             
@@ -398,11 +422,21 @@ class MailService:
         def _send_smtp_sync():
             """동기 SMTP 발송 함수"""
             try:
-                logger.info(f"📤 SMTP 메일 발송 시작 - 발송자: {sender_email}, 수신자: {len(recipient_emails)}명")
+                logger.info(f"🔍 _send_smtp_sync 내부 - SMTP 서버: {self.smtp_server}, 사용자: {self.smtp_username}")
+                
+                # Gmail SMTP 사용 시 발신자 주소를 SMTP 사용자로 강제 변경
+                actual_sender = sender_email
+                if self.smtp_server == "smtp.gmail.com" and self.smtp_username:
+                    actual_sender = self.smtp_username
+                    logger.info(f"📧 Gmail SMTP 사용으로 발신자 주소 변경: {sender_email} → {actual_sender}")
+                else:
+                    logger.info(f"🔍 Gmail SMTP 조건 불만족 - 서버: {self.smtp_server}, 사용자: {self.smtp_username}")
+                
+                logger.info(f"📤 SMTP 메일 발송 시작 - 발송자: {actual_sender}, 수신자: {len(recipient_emails)}명")
                 
                 # MIMEMultipart 메시지 생성
                 msg = MIMEMultipart()
-                msg['From'] = sender_email
+                msg['From'] = actual_sender
                 msg['To'] = ', '.join(recipient_emails)
                 msg['Subject'] = subject
                 
@@ -1445,7 +1479,7 @@ class MailService:
             mail_user = self.db.query(MailUser).filter(
                 and_(
                     MailUser.user_uuid == user_uuid,
-                    MailUser.organization_id == org_id
+                    MailUser.org_id == org_id
                 )
             ).first()
             
@@ -1468,7 +1502,7 @@ class MailService:
             
             # 조직 전체 저장 용량 계산 및 업데이트
             total_storage_mb = self.db.query(func.sum(MailUser.storage_used_mb)).filter(
-                MailUser.organization_id == org_id
+                MailUser.org_id == org_id
             ).scalar() or 0
             
             total_storage_gb = round(total_storage_mb / 1024, 2)
@@ -1478,12 +1512,12 @@ class MailService:
             
             upsert_sql = text("""
                 INSERT INTO organization_usage (
-                    organization_id, usage_date, current_users, current_storage_gb, 
+                    org_id, usage_date, current_users, current_storage_gb, 
                     emails_sent_today, emails_received_today, total_emails_sent, total_emails_received
                 ) VALUES (
                     :org_id, :usage_date, 0, :storage_gb, 0, 0, 0, 0
                 )
-                ON CONFLICT (organization_id, usage_date) 
+                ON CONFLICT (org_id, usage_date) 
                 DO UPDATE SET 
                     current_storage_gb = :storage_gb,
                     updated_at = CURRENT_TIMESTAMP

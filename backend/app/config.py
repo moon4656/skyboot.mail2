@@ -62,12 +62,12 @@ class SaaSSettings(BaseSettings):
     
     # SMTP 설정 (조직별 설정 가능)
     # 개발 환경: Gmail SMTP 사용, 프로덕션: Postfix 사용
-    DEFAULT_SMTP_HOST: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    DEFAULT_SMTP_PORT: int = int(os.getenv("SMTP_PORT", "587"))
-    DEFAULT_SMTP_USER: Optional[str] = os.getenv("SMTP_USER")
-    DEFAULT_SMTP_PASSWORD: Optional[str] = os.getenv("SMTP_PASSWORD")
-    DEFAULT_SMTP_FROM_EMAIL: str = os.getenv("SMTP_FROM_EMAIL", "noreply@skyboot.mail")
-    DEFAULT_SMTP_FROM_NAME: str = "SkyBoot Mail SaaS"
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_FROM_EMAIL: str = "noreply@skyboot.mail"
+    SMTP_FROM_NAME: str = "SkyBoot Mail SaaS"
     
     # 메일 할당량 설정
     DEFAULT_MAIL_QUOTA_MB: int = int(os.getenv("DEFAULT_MAIL_QUOTA_MB", "1000"))  # 기본 1GB
@@ -162,7 +162,7 @@ class SaaSSettings(BaseSettings):
     RELOAD_ON_CHANGE: bool = True if ENVIRONMENT == Environment.DEVELOPMENT else False
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env"),
         case_sensitive=True,
         extra="ignore"
     )
@@ -183,16 +183,16 @@ class SaaSSettings(BaseSettings):
             port = 25
         else:
             # 개발/스테이징/테스트: 기본 SMTP 사용
-            host = self.DEFAULT_SMTP_HOST
-            port = self.DEFAULT_SMTP_PORT
+            host = self.SMTP_HOST
+            port = self.SMTP_PORT
         
         return {
             "host": host,
             "port": port,
-            "user": self.DEFAULT_SMTP_USER,
-            "password": self.DEFAULT_SMTP_PASSWORD,
-            "from_email": self.DEFAULT_SMTP_FROM_EMAIL,
-            "from_name": self.DEFAULT_SMTP_FROM_NAME
+            "user": self.SMTP_USER,
+            "password": self.SMTP_PASSWORD,
+            "from_email": self.SMTP_FROM_EMAIL,
+            "from_name": self.SMTP_FROM_NAME
         }
     
     def is_production(self) -> bool:

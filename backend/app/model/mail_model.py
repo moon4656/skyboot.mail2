@@ -43,7 +43,7 @@ class MailUser(Base):
     
     user_id = Column(String(50), primary_key=True, index=True, comment="연결된 사용자 ID")
     user_uuid = Column(String(36), unique=True, index=True, default=generate_mail_user_uuid, comment="사용자 UUID")
-    org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="소속 조직 ID")
+    org_id = Column(String(36), ForeignKey("organizations.org_id", ondelete="CASCADE"), nullable=False, comment="소속 조직 ID")
     
     email = Column(String(255), index=True, nullable=False, comment="이메일 주소")
     password_hash = Column(String(255), nullable=False, comment="해시된 비밀번호")
@@ -87,7 +87,7 @@ class Mail(Base):
     __tablename__ = "mails"
     
     mail_uuid = Column(String(50), primary_key=True, index=True, default=generate_mail_uuid, comment="메일 고유 UUID")
-    org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="조직 ID")
+    org_id = Column(String(36), ForeignKey("organizations.org_id", ondelete="CASCADE"), nullable=False, comment="조직 ID")
     sender_uuid = Column(String(36), ForeignKey("mail_users.user_uuid"), nullable=False, comment="발송자 UUID")
     subject = Column(String(255), nullable=False, comment="메일 제목")
     body_text = Column(Text, comment="메일 본문 (텍스트)")
@@ -148,7 +148,7 @@ class MailFolder(Base):
     id = Column(Integer, primary_key=True, index=True, comment="폴더 ID")
     folder_uuid = Column(String(36), unique=True, comment="폴더 UUID")
     user_uuid = Column(String(36), ForeignKey("mail_users.user_uuid"), nullable=False, index=True, comment="사용자 UUID")
-    org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="조직 ID")
+    org_id = Column(String(36), ForeignKey("organizations.org_id", ondelete="CASCADE"), nullable=False, comment="조직 ID")
     name = Column(String(100), nullable=False, comment="폴더명")
     folder_type = Column(SQLEnum(FolderType, values_callable=lambda x: [e.value for e in x]), default=FolderType.CUSTOM, comment="폴더 타입")
     parent_id = Column(Integer, ForeignKey("mail_folders.id"), comment="상위 폴더 ID")
@@ -185,7 +185,7 @@ class MailLog(Base):
     id = Column(BigInteger, primary_key=True, index=True)
     mail_uuid = Column(String(50), ForeignKey("mails.mail_uuid"), nullable=False, comment="메일 UUID (mails.mail_uuid 참조)")
     user_uuid = Column(String(36), ForeignKey("mail_users.user_uuid"), comment="사용자 UUID")
-    org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="조직 ID")
+    org_id = Column(String(36), ForeignKey("organizations.org_id", ondelete="CASCADE"), nullable=False, comment="조직 ID")
     action = Column(String(50), nullable=False, comment="수행된 작업")
     details = Column(Text, comment="상세 내용")
     ip_address = Column(String(45), comment="IP 주소")

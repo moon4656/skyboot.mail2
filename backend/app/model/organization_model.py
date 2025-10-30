@@ -66,7 +66,7 @@ class OrganizationSettings(Base):
     __tablename__ = "organization_settings"
     
     id = Column(Integer, primary_key=True, index=True)
-    org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="조직 ID")
+    org_id = Column(String(36), ForeignKey("organizations.org_id", ondelete="CASCADE"), nullable=False, comment="조직 ID")
     setting_key = Column(String(100), nullable=False, comment="설정 키")
     setting_value = Column(Text, comment="설정 값")
     setting_type = Column(String(20), default="string", comment="설정 타입 (string, number, boolean, json)")
@@ -87,7 +87,7 @@ class OrganizationUsage(Base):
     __tablename__ = "organization_usage"
     
     id = Column(Integer, primary_key=True, index=True)
-    org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="조직 ID")
+    org_id = Column(String(36), ForeignKey("organizations.org_id", ondelete="CASCADE"), nullable=False, comment="조직 ID")
     usage_date = Column(DateTime(timezone=True), nullable=False, comment="사용량 기준일")
     
     # 사용량 메트릭

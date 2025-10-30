@@ -14,7 +14,7 @@ class User(Base):
 
     user_id = Column(String(50), primary_key=True, index=True, comment="사용자 ID")
     user_uuid = Column(String(36), unique=True, index=True, default=generate_user_uuid)
-    org_id = Column(String(36), ForeignKey("organizations.org_id"), nullable=False, comment="소속 조직 ID")
+    org_id = Column(String(36), ForeignKey("organizations.org_id", ondelete="CASCADE"), nullable=False, comment="소속 조직 ID")
     
     email = Column(String(255), index=True, nullable=False, comment="이메일 주소")
     username = Column(String(100), index=True, nullable=False, comment="사용자명")

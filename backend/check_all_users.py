@@ -1,66 +1,78 @@
 #!/usr/bin/env python3
 """
-현재 데이터베이스의 모든 사용자를 조회하는 스크립트
+모든 사용자 계정 목록을 확인하는 스크립트
 """
 
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from app.model.user_model import User
-from app.model.organization_model import Organization
 from app.config import settings
+from app.model.user_model import User
+from app.model.mail_model import MailUser
+from app.model.organization_model import Organization
 
-def check_all_users():
-    """
-    데이터베이스의 모든 사용자를 조회하고 출력합니다.
-    """
-    print("=" * 60)
-    print("🔍 현재 데이터베이스의 모든 사용자 조회")
-    print("=" * 60)
+def main():
+    print("🔍 전체 사용자 계정 목록 확인")
     
-    try:
-        # 데이터베이스 연결
-        engine = create_engine(settings.DATABASE_URL)
-        SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-        session = SessionLocal()
+    # 데이터베이스 연결
+    engine = create_engine(settings.DATABASE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    
+    with SessionLocal() as db:
+        print("\n📋 1. 전체 사용자 목록")
+        users = db.query(User).all()
+        print(f"총 사용자 수: {len(users)}명")
         
-        # 모든 사용자 조회 (조직 정보와 함께)
-        users = session.query(User).join(Organization, User.org_id == Organization.org_id).all()
-        
-        if not users:
-            print("❌ 등록된 사용자가 없습니다.")
-            return
-        
-        print(f"📊 총 {len(users)}명의 사용자가 등록되어 있습니다.\n")
-        
-        # 사용자 정보 출력
-        for i, user in enumerate(users, 1):
-            organization = session.query(Organization).filter(Organization.org_id == user.org_id).first()
-            org_name = organization.name if organization else "알 수 없음"
-            
-            print(f"{i}. 사용자 정보:")
-            print(f"   - 이메일: {user.email}")
-            print(f"   - 사용자 UUID: {user.user_uuid}")
-            print(f"   - 역할: {user.role}")
-            print(f"   - 조직: {org_name} ({user.org_id})")
-            print(f"   - 활성화 상태: {'활성' if user.is_active else '비활성'}")
-            print(f"   - 생성일: {user.created_at}")
-            print(f"   - 현재 패스워드 해시: {user.hashed_password[:50]}...")
+        for user in users:
+            print(f"   - ID: {user.user_id}, UUID: {user.user_uuid}")
+            print(f"     이메일: {user.email}")
+            print(f"     사용자명: {user.username}")
+            print(f"     조직 ID: {user.org_id}")
+            print(f"     활성화: {user.is_active}")
+            print(f"     생성일: {user.created_at}")
             print()
         
-        session.close()
+        print("\n📋 2. 메일 사용자 목록")
+        mail_users = db.query(MailUser).all()
+        print(f"총 메일 사용자 수: {len(mail_users)}명")
         
-        print("=" * 60)
-        print("✅ 사용자 조회 완료")
-        print("=" * 60)
+        for mail_user in mail_users:
+            print(f"   - ID: {mail_user.user_id}, UUID: {mail_user.user_uuid}")
+            print(f"     이메일: {mail_user.email}")
+            print(f"     조직 ID: {mail_user.org_id}")
+            print(f"     활성화: {mail_user.is_active}")
+            print(f"     생성일: {mail_user.created_at}")
+            print()
         
-    except Exception as e:
-        print(f"❌ 오류 발생: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        print("\n📋 3. 조직 목록")
+        organizations = db.query(Organization).all()
+        print(f"총 조직 수: {len(organizations)}개")
+        
+        for org in organizations:
+            print(f"   - ID: {org.id}, UUID: {org.org_uuid}")
+            print(f"     조직명: {org.name}")
+            print(f"     도메인: {org.domain}")
+            print(f"     활성화: {org.is_active}")
+            print()
+        
+        print("\n📋 4. 최근 로그인 기록 확인")
+        # 최근 로그인 기록이 있는 사용자 확인
+        recent_login_query = text("""
+            SELECT DISTINCT u.email, u.username, u.user_uuid, u.org_id
+            FROM users u
+            WHERE u.last_login_at IS NOT NULL
+            ORDER BY u.last_login_at DESC
+            LIMIT 10
+        """)
+        recent_logins = db.execute(recent_login_query).fetchall()
+        
+        print(f"최근 로그인한 사용자: {len(recent_logins)}명")
+        for login in recent_logins:
+            print(f"   - {login.email} ({login.username})")
+            print(f"     UUID: {login.user_uuid}, 조직: {login.org_id}")
 
 if __name__ == "__main__":
-    check_all_users()
+    main()

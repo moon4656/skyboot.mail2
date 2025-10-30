@@ -382,17 +382,27 @@ class UserService:
                     detail="사용자를 찾을 수 없습니다."
                 )
             
-            # 업데이트 가능한 필드들
-            allowed_fields = ['username', 'full_name', 'is_active']
+            # 업데이트 가능한 필드들 (User 모델에 실제로 존재하는 필드만)
+            allowed_fields = ['username', 'is_active', 'role']
             
             is_active_changed = False
             old_is_active = user.is_active
+            
+            # roles 배열을 role 단일 값으로 변환 처리
+            if 'roles' in update_data and update_data['roles']:
+                # roles 배열의 첫 번째 값을 role로 설정
+                if isinstance(update_data['roles'], list) and len(update_data['roles']) > 0:
+                    update_data['role'] = update_data['roles'][0]
+                    logger.info(f"📝 roles 배열을 role로 변환: {update_data['roles']} → {update_data['role']}")
+                # roles 필드는 제거 (role 필드로 대체됨)
+                update_data.pop('roles', None)
             
             for field, value in update_data.items():
                 if field in allowed_fields and hasattr(user, field):
                     if field == 'is_active' and user.is_active != value:
                         is_active_changed = True
                     setattr(user, field, value)
+                    logger.info(f"📝 사용자 필드 업데이트: {field} = {value}")
             
             user.updated_at = datetime.now(timezone.utc)
             

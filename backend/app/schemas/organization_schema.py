@@ -75,6 +75,7 @@ class OrganizationBase(BaseModel):
             'feature_flags',
             'features',           # 추가된 키
             'theme',              # 추가된 키
+            'power',              # 전력/성능 관련 설정
             'imap_enabled',       # IMAP 서버 활성화 설정
             'smtp_enabled',       # SMTP 서버 활성화 설정
             'mail_server_enabled' # 메일 서버 전체 활성화 설정
@@ -176,6 +177,16 @@ class OrganizationResponse(OrganizationBase):
     updated_at: datetime = Field(..., description="수정 시간")
 
     model_config = ConfigDict(from_attributes=True)
+    
+    # 응답 스키마에서는 settings 검증을 비활성화 (이미 서비스에서 필터링됨)
+    @field_validator('settings', mode='before')
+    @classmethod
+    def validate_settings_response(cls, v):
+        """
+        응답 스키마에서는 settings 검증을 건너뜁니다.
+        서비스 레이어에서 이미 허용된 키만 필터링되어 전달됩니다.
+        """
+        return v if v is not None else {}
 
 
 class OrganizationSettings(BaseModel):
