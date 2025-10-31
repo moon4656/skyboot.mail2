@@ -162,6 +162,9 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 # Redis 실행
 .\Redis\redis-server.exe .\Redis\redis.windows.conf
 
+# 가상환경 활성화 
+.venv\Scripts\Activate.ps1
+
 ### 프론트엔드 개발
 
 ```bash

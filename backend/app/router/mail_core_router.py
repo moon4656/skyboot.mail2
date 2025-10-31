@@ -4,6 +4,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, asc
 from typing import List, Optional, Dict, Any, Union
+from enum import Enum
 import os
 import uuid
 import shutil
@@ -49,6 +50,12 @@ security = HTTPBearer()
 # 첨부파일 저장 디렉토리
 ATTACHMENT_DIR = "attachments"
 os.makedirs(ATTACHMENT_DIR, exist_ok=True)
+
+
+class DraftSelection(str, Enum):
+    """임시보관함 선택 옵션 (스웨거 콤보용)"""
+    true = "true"
+    false = "false"
 
 
 def _mb_to_bytes(mb: int) -> int:
@@ -143,11 +150,16 @@ async def send_mail(
     subject: str = Form(..., description="메일 제목"),
     content: str = Form(..., description="메일 내용"),
     priority: MailPriority = Form(MailPriority.NORMAL, description="메일 우선순위"),
-    is_draft: Optional[str] = Form("false", description="임시보관함 여부 (true/false)"),
+    is_draft: DraftSelection = Form(DraftSelection.false, description="임시보관함 여부 (콤보 선택)"),
     current_user: User = Depends(get_current_user),
     current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db),
-    attachments: Optional[List[UploadFile]] = File(None, description="첨부파일 목록")
+    attachments: List[UploadFile] = File(
+        None,
+        description="첨부파일 목록",
+        media_type="multipart/form-data",
+    ),
+    request: Request = None,
 ) -> MailSendResponse:
     """
     메일 발송 API
@@ -165,8 +177,8 @@ async def send_mail(
         if not mail_user:
             raise HTTPException(status_code=404, detail="Mail user not found in this organization")
         
-        # is_draft 파라미터 처리
-        is_draft_bool = is_draft.lower() == "true" if is_draft else False
+        # is_draft 파라미터 처리 (콤보 선택값을 불리언으로 변환)
+        is_draft_bool = (is_draft == DraftSelection.true)
         
         # 메일 생성 (조직 ID 포함) - 년월일_시분초_uuid[12] 형식
         from ..model.mail_model import generate_mail_uuid
@@ -188,6 +200,18 @@ async def send_mail(
         db.add(mail)
         db.flush()
         
+        # 첨부파일 보정: Swagger에서 파일 입력을 못 찾는 경우를 대비해 요청에서 재시도
+        if attachments is None or any(not isinstance(a, UploadFile) for a in attachments):
+            try:
+                # 요청 본문에서 안전하게 첨부파일 추출
+                if request is not None:
+                    recovered = await safe_attachments_handler(request)
+                    if recovered:
+                        attachments = recovered
+                        logger.info(f"📎 첨부파일 자동 보정 - {len(attachments)}개 파일 인식")
+            except Exception as e:
+                logger.warning(f"⚠️ 첨부파일 자동 보정 실패: {e}")
+
         # 수신자 처리
         recipients = []
         
@@ -1635,17 +1659,29 @@ async def get_draft_mail_detail(
         raise HTTPException(status_code=500, detail=f"임시보관함 메일 상세 조회 중 오류가 발생했습니다: {str(e)}")
 
 
-@router.get("/trash", response_model=MailListWithPaginationResponse, summary="휴지통")
+@router.get("/trash", response_model=MailListWithPaginationResponse, summary="휴지통 조회")
 async def get_deleted_mails(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     current_org_id: str = Depends(get_current_org_id),
     page: int = Query(1, ge=1, description="Page number"),
     limit: int = Query(20, ge=1, le=100, description="Items per page"), 
-    search: Optional[str] = Query(None, description="Search keyword"),
-    status: Optional[MailStatus] = Query(None, description="Mail status filter")
+    search: Optional[str] = Query(None, description="검색 키워드"),
+    status: Optional[MailStatus] = Query(None, description="메일 상태 필터 (inbox | sent | draft | trash | failed)")
 ) -> MailListWithPaginationResponse:
-    """휴지통 메일 조회"""
+    """
+    휴지통 메일을 조회합니다.
+
+    Args:
+        page: 페이지 번호 (기본값: 1)
+        limit: 페이지당 항목 수 (기본값: 20, 최대: 100)
+        search: 검색어 (제목/본문 텍스트 매칭)
+        status: 메일 상태 필터 - 콤보(드롭다운) 선택 지원
+            허용값: inbox, sent, draft, trash, failed
+
+    Returns:
+        페이지네이션이 적용된 휴지통 메일 목록 응답
+    """
     try:
         logger.info(f"📧 get_deleted_mails 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 페이지: {page}, 제한: {limit}")
         
