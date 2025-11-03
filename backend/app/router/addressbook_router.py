@@ -12,7 +12,8 @@ from ..service.auth_service import get_current_user, logger
 from ..model.user_model import User
 from ..schemas.addressbook_schema import (
     ContactCreate, ContactUpdate, ContactOut, PaginatedContacts,
-    GroupCreate, GroupUpdate, GroupOut
+    GroupCreate, GroupUpdate, GroupOut,
+    DepartmentCreate, DepartmentUpdate, DepartmentOut
 )
 
 router = APIRouter()
@@ -277,6 +278,94 @@ def remove_from_group(contact_uuid: str, group_id: int, db: Session = Depends(ge
     if not ok:
         raise HTTPException(status_code=404, detail="연락처/그룹 링크를 찾을 수 없습니다")
     return {"success": True}
+
+
+# Departments
+@router.get("/departments", response_model=list[DepartmentOut], summary="부서 목록 조회")
+def list_departments(
+    db: Session = Depends(get_db),
+    org_id: str = Depends(get_current_org_id),
+    current_user: User = Depends(get_current_user)
+):
+    """조직 내 모든 부서를 조회합니다."""
+    departments = AddressBookService.list_departments(db, org_id)
+    return [DepartmentOut.from_orm(d) for d in departments]
+
+
+@router.get("/departments/{department_id}", response_model=DepartmentOut, summary="부서 상세 조회")
+def get_department(
+    department_id: int,
+    db: Session = Depends(get_db),
+    org_id: str = Depends(get_current_org_id),
+    current_user: User = Depends(get_current_user)
+):
+    """특정 부서의 상세 정보를 조회합니다."""
+    dept = AddressBookService.get_department(db, org_id, department_id)
+    if not dept:
+        raise HTTPException(status_code=404, detail="부서를 찾을 수 없습니다")
+    return DepartmentOut.from_orm(dept)
+
+
+@router.post("/departments", response_model=DepartmentOut, summary="부서 생성")
+def create_department(
+    body: DepartmentCreate,
+    db: Session = Depends(get_db),
+    org_id: str = Depends(get_current_org_id),
+    current_user: User = Depends(get_current_user)
+):
+    """새로운 부서를 생성합니다."""
+    try:
+        dept = AddressBookService.create_department(db, org_id, body.name, body.parent_id)
+        return DepartmentOut.from_orm(dept)
+    except Exception as e:
+        # 중복 이름 또는 유효하지 않은 상위 부서 등의 오류
+        msg = str(e)
+        if "존재하는 부서명" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        raise HTTPException(status_code=400, detail=f"부서 생성 실패: {msg}")
+
+
+@router.put("/departments/{department_id}", response_model=DepartmentOut, summary="부서 수정")
+def update_department(
+    department_id: int,
+    body: DepartmentUpdate,
+    db: Session = Depends(get_db),
+    org_id: str = Depends(get_current_org_id),
+    current_user: User = Depends(get_current_user)
+):
+    """부서 정보를 수정합니다."""
+    try:
+        dept = AddressBookService.update_department(db, org_id, department_id, body.dict(exclude_unset=True))
+        if not dept:
+            raise HTTPException(status_code=404, detail="부서를 찾을 수 없습니다")
+        return DepartmentOut.from_orm(dept)
+    except Exception as e:
+        msg = str(e)
+        if "존재하는 부서명" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        raise HTTPException(status_code=400, detail=f"부서 수정 실패: {msg}")
+
+
+@router.delete("/departments/{department_id}", summary="부서 삭제")
+def delete_department(
+    department_id: int,
+    db: Session = Depends(get_db),
+    org_id: str = Depends(get_current_org_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    부서를 삭제합니다. 하위 부서나 참조 중인 연락처가 있는 경우 409를 반환합니다.
+    """
+    try:
+        ok = AddressBookService.delete_department(db, org_id, department_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="부서를 찾을 수 없습니다")
+        return {"success": True}
+    except Exception as e:
+        msg = str(e)
+        if "삭제할 수 없습니다" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        raise HTTPException(status_code=400, detail=f"부서 삭제 실패: {msg}")
 
 
 @router.post("/contacts/import", summary="연락처 CSV 가져오기")

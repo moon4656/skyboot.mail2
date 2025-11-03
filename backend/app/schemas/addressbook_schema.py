@@ -3,10 +3,24 @@ from pydantic import BaseModel, EmailStr, ConfigDict
 
 
 class DepartmentOut(BaseModel):
+    """부서 응답 스키마"""
     id: int
     name: str
+    parent_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DepartmentCreate(BaseModel):
+    """부서 생성 요청 스키마"""
+    name: str
+    parent_id: Optional[int] = None
+
+
+class DepartmentUpdate(BaseModel):
+    """부서 수정 요청 스키마"""
+    name: Optional[str] = None
+    parent_id: Optional[int] = None
 
 
 class GroupCreate(BaseModel):

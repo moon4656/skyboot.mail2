@@ -51,6 +51,37 @@ security = HTTPBearer()
 ATTACHMENT_DIR = "attachments"
 os.makedirs(ATTACHMENT_DIR, exist_ok=True)
 
+def _resolve_attachment_path(attachment: MailAttachment) -> str:
+    """
+    첨부파일 실제 경로를 안전하게 해석합니다.
+
+    - DB에 상대 경로가 저장된 경우 현재 작업 디렉터리 기준으로 재해석합니다.
+    - 예상 저장소(ATTACHMENT_DIR) 하위에 UUID+확장자 형태로 재구성한 경로도 후보로 검사합니다.
+
+    Args:
+        attachment: 첨부파일 레코드
+
+    Returns:
+        존재하는 파일의 경로 (없으면 원래 경로 반환)
+    """
+    try:
+        candidates = []
+        if attachment.file_path:
+            candidates.append(attachment.file_path)
+            if not os.path.isabs(attachment.file_path):
+                candidates.append(os.path.join(os.getcwd(), attachment.file_path))
+
+        ext = os.path.splitext(attachment.filename or "")[1]
+        if getattr(attachment, "attachment_uuid", None):
+            candidates.append(os.path.join(ATTACHMENT_DIR, f"{attachment.attachment_uuid}{ext}"))
+
+        for p in candidates:
+            if p and os.path.exists(p):
+                return p
+        return attachment.file_path or ""
+    except Exception:
+        return attachment.file_path or ""
+
 
 class DraftSelection(str, Enum):
     """임시보관함 선택 옵션 (스웨거 콤보용)"""
@@ -1940,8 +1971,9 @@ async def download_attachment(
             logger.warning(f"⚠️ 첨부파일 접근 권한 없음 - 조직: {current_org_id}, 사용자: {current_user.email}, 첨부파일ID: {attachment_id}")
             raise HTTPException(status_code=403, detail="첨부파일에 대한 접근 권한이 없습니다")
         
-        # 파일 존재 확인
-        if not os.path.exists(attachment.file_path):
+        # 파일 존재 확인 (경로 해석)
+        resolved_path = _resolve_attachment_path(attachment)
+        if not resolved_path or not os.path.exists(resolved_path):
             logger.warning(f"⚠️ 첨부파일이 존재하지 않음 - 경로: {attachment.file_path}")
             raise HTTPException(status_code=404, detail="첨부파일이 존재하지 않습니다")
         
@@ -1961,7 +1993,7 @@ async def download_attachment(
         logger.info(f"✅ download_attachment 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 첨부파일: {attachment.filename}")
         
         return FileResponse(
-            path=attachment.file_path,
+            path=resolved_path,
             filename=attachment.filename,
             media_type=attachment.content_type
         )

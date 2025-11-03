@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, asc, func
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 from ..database.user import get_db
@@ -32,6 +32,7 @@ import os
 import base64
 import hashlib
 import mimetypes
+import re
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
@@ -39,6 +40,42 @@ logger = logging.getLogger(__name__)
 
 # 라우터 초기화 - 편의 기능
 router = APIRouter()
+
+# 첨부파일 저장 디렉토리 (상대 경로 저장 대비)
+ATTACHMENT_DIR = "attachments"
+
+def _resolve_attachment_path(attachment: MailAttachment) -> str:
+    """
+    첨부파일 실제 경로를 안전하게 해석합니다.
+
+    - DB에 상대 경로가 저장된 경우 현재 작업 디렉터리/프로젝트 루트 기준으로 재해석합니다.
+    - 예상 저장소(ATTACHMENT_DIR) 하위에 UUID+확장자 형태로 재구성한 경로도 후보로 검사합니다.
+
+    Args:
+        attachment: 첨부파일 레코드
+
+    Returns:
+        존재하는 파일의 경로 (없으면 원래 경로 반환)
+    """
+    try:
+        candidates = []
+        fp = getattr(attachment, "file_path", None)
+        if fp:
+            candidates.append(fp)
+            if not os.path.isabs(fp):
+                candidates.append(os.path.join(os.getcwd(), fp))
+
+        # 파일 확장자 결정 (filename 기반)
+        ext = os.path.splitext(getattr(attachment, "filename", ""))[1]
+        if getattr(attachment, "attachment_uuid", None):
+            candidates.append(os.path.join(ATTACHMENT_DIR, f"{attachment.attachment_uuid}{ext}"))
+
+        for p in candidates:
+            if p and os.path.exists(p):
+                return p
+        return fp or ""
+    except Exception:
+        return getattr(attachment, "file_path", "")
 
 
 @router.post("/search", response_model=MailSearchResponse, summary="메일 검색")
@@ -542,6 +579,7 @@ async def get_unread_mails(
         inbox_folder = db.query(MailFolder).filter(
             and_(
                 MailFolder.user_uuid == mail_user.user_uuid,
+                MailFolder.org_id == current_org_id,
                 MailFolder.folder_type == FolderType.INBOX
             )
         ).first()
@@ -559,6 +597,8 @@ async def get_unread_mails(
                 }
             )
         
+        logger.info(f"📧 mail_user.user_uuid: {mail_user.user_uuid} inbox_folder.folder_uuid: {inbox_folder.folder_uuid}")
+        
         # 읽지 않은 메일 쿼리 (조직별 필터링 및 읽지 않은 상태 필터링 추가)
         # MailRecipient 조인 제거 - 받은편지함 API와 동일한 방식 사용
         query = db.query(Mail).join(
@@ -567,6 +607,9 @@ async def get_unread_mails(
             and_(
                 Mail.org_id == current_org_id,
                 MailInFolder.folder_uuid == inbox_folder.folder_uuid,
+                # 로그인한 사용자 기준으로 한정
+                # MailInFolder.org_id == current_org_id,
+                MailInFolder.user_uuid == mail_user.user_uuid,
                 MailInFolder.is_read == False  # 읽지 않은 메일만 필터링
             )
         )
@@ -592,6 +635,7 @@ async def get_unread_mails(
             # 현재 사용자의 읽음 상태 확인 (MailInFolder에서)
             mail_in_folder = db.query(MailInFolder).filter(
                 MailInFolder.mail_uuid == mail.mail_uuid,
+                # MailInFolder.org_id == current_org_id,
                 MailInFolder.user_uuid == mail_user.user_uuid
             ).first()
             is_read = mail_in_folder.is_read if mail_in_folder else False
@@ -973,36 +1017,44 @@ async def mark_all_mails_as_read(
         
         # 폴더 타입에 따른 처리
         if folder_type == "inbox":
-            # 받은편지함 폴더 조회
+            # 받은편지함 폴더 조회 (조직 격리 포함)
             folder = db.query(MailFolder).filter(
                 and_(
                     MailFolder.user_uuid == mail_user.user_uuid,
+                    MailFolder.org_id == current_org_id,
                     MailFolder.folder_type == FolderType.INBOX
                 )
             ).first()
             
             if folder:
-                # 받은편지함의 읽지 않은 메일들 (조직별 격리)
-                mails = db.query(Mail).join(
-                    MailInFolder, Mail.mail_uuid == MailInFolder.mail_uuid
-                ).filter(
+                # 받은편지함의 읽지 않은 항목들 (현재 사용자/조직 기준)
+                mails_in_folder = db.query(MailInFolder).filter(
                     and_(
                         MailInFolder.folder_uuid == folder.folder_uuid,
-                        Mail.read_at.is_(None),
-                        Mail.org_id == current_org_id
+                        MailInFolder.user_uuid == mail_user.user_uuid,
+                        MailInFolder.is_read == False
                     )
                 ).all()
         
         elif folder_type == "sent":
-            # 보낸 메일함의 읽지 않은 메일들 (조직별 격리)
-            mails = db.query(Mail).filter(
+            # 보낸편지함 폴더 조회 (조직 격리 포함)
+            folder = db.query(MailFolder).filter(
                 and_(
-                    Mail.sender_uuid == mail_user.user_uuid,
-                    Mail.status == MailStatus.SENT,
-                    Mail.read_at.is_(None),
-                    Mail.org_id == current_org_id
+                    MailFolder.user_uuid == mail_user.user_uuid,
+                    MailFolder.org_id == current_org_id,
+                    MailFolder.folder_type == FolderType.SENT
                 )
-            ).all()
+            ).first()
+            
+            if folder:
+                # 보낸편지함의 읽지 않은 항목들 (현재 사용자/조직 기준)
+                mails_in_folder = db.query(MailInFolder).filter(
+                    and_(
+                        MailInFolder.folder_uuid == folder.folder_uuid,
+                        MailInFolder.user_uuid == mail_user.user_uuid,
+                        MailInFolder.is_read == False
+                    )
+                ).all()
         
         else:
             return APIResponse(
@@ -1013,20 +1065,23 @@ async def mark_all_mails_as_read(
         
         # 모든 메일 읽음 처리
         updated_count = 0
-        current_time = datetime.utcnow()
+        current_time = datetime.now(timezone.utc)
         
-        for mail in mails:
-            mail.read_at = current_time
-            updated_count += 1
-            
-            # 로그 기록
-            log_entry = MailLog(
-                mail_uuid=mail.mail_uuid,
-                user_uuid=current_user.user_uuid,
-                org_id=current_org_id,
-                action="read"
-            )
-            db.add(log_entry)
+        # 폴더가 없거나 읽지 않은 항목이 없으면 0 처리
+        if 'mails_in_folder' in locals():
+            for mail_in_folder in mails_in_folder:
+                mail_in_folder.is_read = True
+                mail_in_folder.read_at = current_time
+                updated_count += 1
+                
+                # 로그 기록
+                log_entry = MailLog(
+                    mail_uuid=mail_in_folder.mail_uuid,
+                    user_uuid=current_user.user_uuid,
+                    org_id=current_org_id,
+                    action="read"
+                )
+                db.add(log_entry)
         
         db.commit()
         
@@ -1099,6 +1154,7 @@ async def star_mail(
         log_entry = MailLog(
             mail_uuid=mail.mail_uuid,
             user_uuid=current_user.user_uuid,
+            org_id=current_org_id,
             action="star",
             details=f"메일 중요 표시 - 제목: {mail.subject}"
         )
@@ -1174,6 +1230,7 @@ async def unstar_mail(
         log_entry = MailLog(
             mail_uuid=mail.mail_uuid,
             user_uuid=current_user.user_uuid,
+            org_id=current_org_id,
             action="unstar",
             details=f"메일 중요 표시 해제 - 제목: {mail.subject}"
         )
@@ -1665,7 +1722,9 @@ async def virus_scan_attachments(
                     ))
                     continue
 
-                if not attachment.file_path or not os.path.exists(attachment.file_path):
+                # 안전한 경로 해석 후 존재 여부 확인
+                resolved_path = _resolve_attachment_path(attachment)
+                if not resolved_path or not os.path.exists(resolved_path):
                     results.append(VirusScanResultItem(
                         attachment_uuid=att_uuid,
                         status="error",
@@ -1676,7 +1735,7 @@ async def virus_scan_attachments(
                     continue
 
                 # 파일 크기 확인
-                file_size_mb = os.path.getsize(attachment.file_path) / (1024 * 1024)
+                file_size_mb = os.path.getsize(resolved_path) / (1024 * 1024)
                 if file_size_mb > settings.VIRUS_SCAN_MAX_FILE_SIZE_MB:
                     results.append(VirusScanResultItem(
                         attachment_uuid=att_uuid,
@@ -1689,7 +1748,7 @@ async def virus_scan_attachments(
 
                 # ClamAV 바이러스 검사 수행
                 logger.info(f"🔍 바이러스 검사 수행 - 파일: {attachment.filename}, 크기: {file_size_mb:.1f}MB")
-                scan_result = virus_scanner.scan_file(attachment.file_path)
+                scan_result = virus_scanner.scan_file(resolved_path)
                 
                 # 결과 변환
                 if scan_result.error_message:
@@ -1757,7 +1816,9 @@ async def preview_attachment(
         if not mail or mail.org_id != current_org_id:
             raise HTTPException(status_code=403, detail="접근 권한이 없습니다")
 
-        if not attachment.file_path or not os.path.exists(attachment.file_path):
+        # 안전한 경로 해석 후 존재 여부 확인
+        resolved_path = _resolve_attachment_path(attachment)
+        if not resolved_path or not os.path.exists(resolved_path):
             raise HTTPException(status_code=404, detail="첨부파일이 서버에 존재하지 않습니다")
 
         # 콘텐츠 타입 확인 및 보완
@@ -1770,7 +1831,7 @@ async def preview_attachment(
         try:
             if content_type and content_type.startswith("text/"):
                 # 텍스트 파일은 앞부분만 읽어 미리보기 제공 (최대 32KB)
-                with open(attachment.file_path, "rb") as f:
+                with open(resolved_path, "rb") as f:
                     blob = f.read(32 * 1024)
                 # 인코딩 추정 없이 UTF-8 우선, 실패 시 cp949/latin-1 시도
                 for enc in ["utf-8", "cp949", "latin-1"]:
@@ -1781,7 +1842,7 @@ async def preview_attachment(
                     except Exception:
                         continue
             elif content_type and content_type.startswith("image/"):
-                with open(attachment.file_path, "rb") as f:
+                with open(resolved_path, "rb") as f:
                     blob = f.read()
                 b64 = base64.b64encode(blob).decode("ascii")
                 preview_data_url = f"data:{content_type};base64,{b64}"
@@ -1848,11 +1909,22 @@ async def reschedule_mail(
         updated = False
         for s in schedules:
             if s.get("mail_uuid") == req.mail_uuid:
-                s["scheduled_at"] = req.scheduled_at.isoformat()
+                # 시간대를 UTC로 정규화하여 저장 (naive이면 UTC로 가정)
+                sa = req.scheduled_at
+                if sa.tzinfo is None:
+                    sa = sa.replace(tzinfo=timezone.utc)
+                else:
+                    sa = sa.astimezone(timezone.utc)
+                s["scheduled_at"] = sa.isoformat()
                 updated = True
                 break
         if not updated:
-            schedules.append({"mail_uuid": req.mail_uuid, "scheduled_at": req.scheduled_at.isoformat()})
+            sa = req.scheduled_at
+            if sa.tzinfo is None:
+                sa = sa.replace(tzinfo=timezone.utc)
+            else:
+                sa = sa.astimezone(timezone.utc)
+            schedules.append({"mail_uuid": req.mail_uuid, "scheduled_at": sa.isoformat()})
 
         # 저장
         if not setting:
@@ -1883,7 +1955,8 @@ async def process_scheduled_mails(
     db: Session = Depends(get_db)
 ) -> ScheduleDispatchResponse:
     try:
-        now = datetime.utcnow()
+        # 현재 시간을 UTC aware datetime으로 사용
+        now = datetime.now(timezone.utc)
         setting = db.query(OrganizationSettings).filter(
             OrganizationSettings.org_id == current_org_id,
             OrganizationSettings.setting_key == "mail_schedules"
@@ -1902,6 +1975,11 @@ async def process_scheduled_mails(
         for s in schedules:
             try:
                 ts = datetime.fromisoformat(s.get("scheduled_at"))
+                # tz-aware로 정규화 (naive이면 UTC로 가정)
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                else:
+                    ts = ts.astimezone(timezone.utc)
             except Exception:
                 ts = None
             if ts and ts <= now and len(ready) < limit:
@@ -1952,7 +2030,8 @@ async def process_scheduled_mails(
             if result.get("success"):
                 # 상태 갱신
                 mail.status = MailStatus.SENT
-                mail.sent_at = datetime.utcnow()
+                # 발송 시간도 UTC aware로 저장
+                mail.sent_at = datetime.now(timezone.utc)
                 db.add(mail)
                 processed += 1
             else:
@@ -1986,6 +2065,8 @@ async def process_scheduled_mails(
 async def get_mail_logs(
     page: int = Query(1, ge=1, description="페이지 번호"),
     limit: int = Query(20, ge=1, le=100, description="페이지당 항목 수"),
+    date_from: Optional[str] = Query(None, description="시작 일시 (ISO8601 또는 YYYYMMDD/YYYY-MM-DD)"),
+    date_to: Optional[str] = Query(None, description="종료 일시 (ISO8601 또는 YYYYMMDD/YYYY-MM-DD)"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     current_org_id: str = Depends(get_current_org_id)
@@ -2004,7 +2085,10 @@ async def get_mail_logs(
         메일 로그 목록과 페이지네이션 정보
     """
     try:
-        logger.info(f"📊 메일 로그 조회 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 페이지: {page}")
+        logger.info(
+            f"📊 메일 로그 조회 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 페이지: {page}, "
+            f"범위: {(date_from if date_from else '전체')} ~ {(date_to if date_to else '전체')}"
+        )
         
         # 오프셋 계산
         offset = (page - 1) * limit
@@ -2014,6 +2098,57 @@ async def get_mail_logs(
             MailLog.org_id == current_org_id,
             MailLog.user_uuid == current_user.user_uuid
         ).order_by(desc(MailLog.created_at))
+
+        # 날짜/일시 문자열 파싱 함수
+        def _parse_date_param(date_str: Optional[str], is_end: bool = False) -> Optional[datetime]:
+            """
+            날짜/일시 문자열을 UTC 기준 timezone-aware datetime으로 변환합니다.
+
+            지원 포맷:
+            - ISO8601 (예: 2025-11-03T12:00:00Z, 2025-11-03T12:00:00+09:00)
+            - 날짜만: YYYYMMDD, YYYY-MM-DD
+
+            Args:
+                date_str: 입력 문자열
+                is_end: 날짜만 입력된 경우 하루의 끝(23:59:59.999999)으로 변환할지 여부
+
+            Returns:
+                UTC 기준 timezone-aware datetime 또는 None (파싱 실패 시)
+            """
+            if not date_str:
+                return None
+            s = date_str.strip()
+            try:
+                # YYYYMMDD
+                if len(s) == 8 and s.isdigit():
+                    dt = datetime.strptime(s, "%Y%m%d")
+                    if is_end:
+                        dt = dt + timedelta(days=1) - timedelta(microseconds=1)
+                    return dt.replace(tzinfo=timezone.utc)
+                # YYYY-MM-DD
+                if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+                    dt = datetime.strptime(s, "%Y-%m-%d")
+                    if is_end:
+                        dt = dt + timedelta(days=1) - timedelta(microseconds=1)
+                    return dt.replace(tzinfo=timezone.utc)
+                # ISO8601 일반 처리 ('Z'를 '+00:00'로 치환)
+                iso = s.replace("Z", "+00:00")
+                dt = datetime.fromisoformat(iso)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                else:
+                    dt = dt.astimezone(timezone.utc)
+                return dt
+            except Exception:
+                return None
+
+        # 날짜 필터 적용
+        from_dt = _parse_date_param(date_from, is_end=False)
+        to_dt = _parse_date_param(date_to, is_end=True)
+        if from_dt:
+            logs_query = logs_query.filter(MailLog.created_at >= from_dt)
+        if to_dt:
+            logs_query = logs_query.filter(MailLog.created_at <= to_dt)
         
         # 전체 개수 조회
         total_count = logs_query.count()

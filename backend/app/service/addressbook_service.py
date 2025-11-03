@@ -198,3 +198,141 @@ class AddressBookService:
         db.delete(link)
         db.commit()
         return True
+
+    # Departments
+    @staticmethod
+    def list_departments(db: Session, org_id: str) -> List[Department]:
+        """조직의 모든 부서를 조회합니다."""
+        return db.query(Department).filter(Department.org_id == org_id).order_by(Department.name.asc()).all()
+
+    @staticmethod
+    def get_department(db: Session, org_id: str, department_id: int) -> Optional[Department]:
+        """부서 상세 정보를 조회합니다."""
+        return db.query(Department).filter(Department.org_id == org_id, Department.id == department_id).first()
+
+    @staticmethod
+    def create_department(db: Session, org_id: str, name: str, parent_id: Optional[int] = None) -> Department:
+        """
+        부서를 생성합니다.
+
+        Args:
+            db: 데이터베이스 세션
+            org_id: 조직 ID
+            name: 부서명
+            parent_id: 상위 부서 ID (선택)
+
+        Returns:
+            생성된 부서 객체
+
+        Raises:
+            ValueError: 중복 이름 또는 잘못된 상위 부서 지정 시
+        """
+        try:
+            # 이름 중복 검사
+            existing = db.query(Department).filter(
+                Department.org_id == org_id,
+                Department.name == name
+            ).first()
+            if existing:
+                raise ValueError(f"이미 존재하는 부서명입니다: {name}")
+
+            # 상위 부서 유효성 검사 및 정규화 (0, 음수, 빈 값은 루트로 간주)
+            normalized_parent_id: Optional[int] = parent_id
+            if normalized_parent_id is not None:
+                try:
+                    normalized_parent_id = int(normalized_parent_id)
+                except Exception:
+                    raise ValueError(f"유효하지 않은 상위 부서 ID입니다: {parent_id}")
+                if normalized_parent_id <= 0:
+                    normalized_parent_id = None
+                else:
+                    parent = db.query(Department).filter(
+                        Department.org_id == org_id,
+                        Department.id == normalized_parent_id
+                    ).first()
+                    if not parent:
+                        raise ValueError(f"유효하지 않은 상위 부서 ID입니다: {parent_id}")
+
+            dept = Department(org_id=org_id, name=name, parent_id=normalized_parent_id)
+            db.add(dept)
+            db.commit()
+            db.refresh(dept)
+            return dept
+        except Exception as e:
+            db.rollback()
+            error_msg = str(e)
+            if "unique" in error_msg.lower() and "name" in error_msg.lower():
+                raise ValueError(f"이미 존재하는 부서명입니다: {name}")
+            else:
+                raise ValueError(f"부서 생성 중 오류가 발생했습니다: {error_msg}")
+
+    @staticmethod
+    def update_department(db: Session, org_id: str, department_id: int, data: dict) -> Optional[Department]:
+        """부서 정보를 수정합니다."""
+        dept = db.query(Department).filter(Department.org_id == org_id, Department.id == department_id).first()
+        if not dept:
+            return None
+
+        # 이름 중복 검사
+        if "name" in data and data["name"]:
+            dup = db.query(Department).filter(
+                Department.org_id == org_id,
+                Department.name == data["name"],
+                Department.id != department_id
+            ).first()
+            if dup:
+                raise ValueError(f"이미 존재하는 부서명입니다: {data['name']}")
+
+        # 상위 부서 유효성 검사 및 정규화 (0, 음수, 빈 값은 루트로 간주)
+        if "parent_id" in data:
+            new_parent_id = data["parent_id"]
+            if new_parent_id is not None:
+                try:
+                    new_parent_id = int(new_parent_id)
+                except Exception:
+                    raise ValueError(f"유효하지 않은 상위 부서 ID입니다: {data['parent_id']}")
+                if new_parent_id <= 0:
+                    data["parent_id"] = None
+                else:
+                    if new_parent_id == department_id:
+                        raise ValueError("상위 부서를 자기 자신으로 설정할 수 없습니다.")
+                    parent = db.query(Department).filter(
+                        Department.org_id == org_id,
+                        Department.id == new_parent_id
+                    ).first()
+                    if not parent:
+                        raise ValueError(f"유효하지 않은 상위 부서 ID입니다: {new_parent_id}")
+                    data["parent_id"] = new_parent_id
+
+        for k, v in data.items():
+            setattr(dept, k, v)
+        db.commit()
+        db.refresh(dept)
+        return dept
+
+    @staticmethod
+    def delete_department(db: Session, org_id: str, department_id: int) -> bool:
+        """
+        부서를 삭제합니다. 하위 부서나 참조 중인 연락처가 있는 경우 삭제할 수 없습니다.
+        """
+        dept = db.query(Department).filter(Department.org_id == org_id, Department.id == department_id).first()
+        if not dept:
+            return False
+
+        # 하위 부서 존재 여부 확인
+        child = db.query(Department).filter(Department.org_id == org_id, Department.parent_id == department_id).first()
+        if child:
+            raise ValueError("하위 부서가 존재하여 삭제할 수 없습니다.")
+
+        # 연락처 참조 존재 여부 확인
+        # 연락처 기본키는 contact_uuid 이므로 이를 기준으로 카운트
+        contact_ref_count = db.query(func.count(Contact.contact_uuid)).filter(
+            Contact.org_id == org_id,
+            Contact.department_id == department_id
+        ).scalar()
+        if contact_ref_count and contact_ref_count > 0:
+            raise ValueError("이 부서를 참조하는 연락처가 있어 삭제할 수 없습니다.")
+
+        db.delete(dept)
+        db.commit()
+        return True

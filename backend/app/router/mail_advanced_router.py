@@ -3,7 +3,8 @@ from fastapi.responses import JSONResponse, FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, asc, func, text
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import re
 import logging
 import json
 import os
@@ -119,6 +120,25 @@ async def create_folder(
         
         # UUID 생성
         folder_uuid = str(uuid.uuid4())
+
+        # parent_id 유효성 검증 (같은 사용자/조직의 기존 폴더여야 함)
+        parent_id_validated = None
+        if folder_data.parent_id is not None:
+            parent_folder = db.query(MailFolder).filter(
+                and_(
+                    MailFolder.id == folder_data.parent_id,
+                    MailFolder.user_uuid == mail_user.user_uuid,
+                    MailFolder.org_id == current_org_id
+                )
+            ).first()
+            if not parent_folder:
+                # 상위 폴더가 유효하지 않으면 최상위 폴더로 생성 (parent_id=None)
+                logger.warning(
+                    f"⚠️ 상위 폴더를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}, parent_id: {folder_data.parent_id}. 최상위로 생성합니다"
+                )
+                parent_id_validated = None
+            else:
+                parent_id_validated = parent_folder.id
         
         # 새 폴더 생성 (조직 ID 추가)
         new_folder = MailFolder(
@@ -127,7 +147,7 @@ async def create_folder(
             org_id=current_org_id,
             name=folder_data.name,
             folder_type=folder_data.folder_type,
-            parent_id=folder_data.parent_id  # parent_id 추가
+            parent_id=parent_id_validated  # 검증된 parent_id만 설정
         )
         
         db.add(new_folder)
@@ -211,7 +231,27 @@ async def update_folder(
         if folder_data.folder_type:
             folder.folder_type = folder_data.folder_type
         if folder_data.parent_id is not None:
-            folder.parent_id = folder_data.parent_id
+            # 자기 자신을 부모로 설정 방지
+            if folder_data.parent_id == folder.id:
+                raise HTTPException(status_code=400, detail="자기 자신을 상위 폴더로 설정할 수 없습니다")
+
+            # 같은 사용자/조직의 유효한 상위 폴더인지 검증
+            parent_folder = db.query(MailFolder).filter(
+                and_(
+                    MailFolder.id == folder_data.parent_id,
+                    MailFolder.user_uuid == mail_user.user_uuid,
+                    MailFolder.org_id == current_org_id
+                )
+            ).first()
+
+            if not parent_folder:
+                # 유효하지 않으면 최상위로 변경
+                logger.warning(
+                    f"⚠️ 상위 폴더를 찾을 수 없음 - 조직: {current_org_id}, 사용자: {current_user.email}, parent_id: {folder_data.parent_id}. 최상위로 변경합니다"
+                )
+                folder.parent_id = None
+            else:
+                folder.parent_id = parent_folder.id
         
         folder.updated_at = datetime.utcnow()
         db.commit()
@@ -396,12 +436,13 @@ async def move_mail_to_folder(
         
         db.commit()
         
-        # 로그 기록
+        # 로그 기록 (조직/메일사용자 정보 포함)
         log_entry = MailLog(
-            action=f"moved_to_folder",
+            action="moved_to_folder",
             details=f"메일을 '{folder.name}' 폴더로 이동",
             mail_uuid=mail.mail_uuid,
-            user_uuid=current_user.user_uuid,
+            user_uuid=mail_user.user_uuid,
+            org_id=current_org_id,
             ip_address=None,  # TODO: 실제 IP 주소 추가
             user_agent=None   # TODO: 실제 User-Agent 추가
         )
@@ -436,8 +477,8 @@ async def move_mail_to_folder(
 @router.post("/backup", response_model=None, summary="메일 백업")
 async def backup_mails(
     include_attachments: bool = Query(False, description="첨부파일 포함 여부"),
-    date_from: Optional[datetime] = Query(None, description="백업 시작 날짜"),
-    date_to: Optional[datetime] = Query(None, description="백업 종료 날짜"),
+    date_from: Optional[str] = Query(None, description="백업 시작 날짜 (YYYYMMDD, YYYY-MM-DD, ISO8601 지원)"),
+    date_to: Optional[str] = Query(None, description="백업 종료 날짜 (YYYYMMDD, YYYY-MM-DD, ISO8601 지원)"),
     current_user: User = Depends(get_current_user),
     current_org_id: str = Depends(get_current_org_id),
     db: Session = Depends(get_db)
@@ -445,6 +486,34 @@ async def backup_mails(
     """사용자 메일 백업"""
     try:
         logger.info(f"💾 backup_mails 시작 - 조직: {current_org_id}, 사용자: {current_user.email}")
+
+        # 날짜 파라미터 파싱 함수
+        def _parse_date_param(date_str: Optional[str], end_of_day: bool = False) -> Optional[datetime]:
+            """문자열 날짜를 UTC 인식 datetime으로 변환합니다."""
+            if not date_str:
+                return None
+            s = date_str.strip()
+            try:
+                # YYYYMMDD
+                if re.fullmatch(r"\d{8}", s):
+                    year = int(s[0:4]); month = int(s[4:6]); day = int(s[6:8])
+                    dt = datetime(year, month, day, tzinfo=timezone.utc)
+                # YYYY-MM-DD
+                elif re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
+                    dt = datetime.strptime(s, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                else:
+                    # ISO8601 등 일반 포맷 시도
+                    dt = datetime.fromisoformat(s)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    else:
+                        dt = dt.astimezone(timezone.utc)
+                if end_of_day:
+                    # 종료일의 하루 끝을 포함하기 위해 다음날 00:00로 설정
+                    dt = dt + timedelta(days=1)
+                return dt
+            except Exception:
+                return None
         
         # 메일 사용자 조회 (조직별 필터링 추가)
         mail_user = db.query(MailUser).filter(
@@ -471,12 +540,24 @@ async def backup_mails(
             )
         )
         
-        # 날짜 필터 적용
-        if date_from:
-            query = query.filter(Mail.created_at >= date_from)
-        if date_to:
-            end_date = date_to + timedelta(days=1)
-            query = query.filter(Mail.created_at < end_date)
+        # 날짜 필터 파싱 및 적용 (sent_at 우선, 없으면 created_at 기준)
+        start_dt = _parse_date_param(date_from, end_of_day=False)
+        end_dt = _parse_date_param(date_to, end_of_day=True)
+
+        if start_dt:
+            query = query.filter(
+                or_(
+                    and_(Mail.sent_at.isnot(None), Mail.sent_at >= start_dt),
+                    and_(Mail.sent_at.is_(None), Mail.created_at >= start_dt)
+                )
+            )
+        if end_dt:
+            query = query.filter(
+                or_(
+                    and_(Mail.sent_at.isnot(None), Mail.sent_at < end_dt),
+                    and_(Mail.sent_at.is_(None), Mail.created_at < end_dt)
+                )
+            )
         
         mails = query.all()
         
@@ -550,7 +631,7 @@ async def backup_mails(
         # 백업 파일 크기 계산
         backup_size = os.path.getsize(backup_path)
         
-        logger.info(f"✅ backup_mails 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일 수: {len(mails)}, 파일 크기: {backup_size}")
+        logger.info(f"✅ backup_mails 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 메일 수: {len(mails)}, 파일 크기: {backup_size}, 범위: {date_from}~{date_to}")
         
         return {
             "success": True,
@@ -579,27 +660,55 @@ async def download_backup(
     """백업 파일 다운로드"""
     try:
         logger.info(f"📥 download_backup 시작 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {backup_filename}")
-        
-        # 파일명 검증 (보안)
-        if not backup_filename.startswith(f"mail_backup_{current_user.email}_"):
-            logger.warning(f"⚠️ 백업 파일 접근 거부 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {backup_filename}")
+
+        # 파일명 정규화: 앞뒤 공백 및 따옴표 제거, 경로 분리자 제거
+        normalized_name = backup_filename.strip().strip('"').strip("'")
+        normalized_name = os.path.basename(normalized_name)
+
+        if normalized_name != backup_filename:
+            logger.info(
+                f"ℹ️ 파일명 정규화 적용 - 원본: {backup_filename}, 정규화: {normalized_name}"
+            )
+
+        # 파일명 검증 (사용자 이메일 기반 프리픽스)
+        expected_prefix = f"mail_backup_{current_user.email}_"
+        if not normalized_name.startswith(expected_prefix):
+            logger.warning(
+                f"⚠️ 백업 파일 접근 거부 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {normalized_name}"
+            )
             raise HTTPException(status_code=403, detail="접근이 거부되었습니다")
-        
-        backup_path = os.path.join(BACKUP_DIR, backup_filename)
-        
+
+        # 경로 생성 및 디렉터리 탈출 방지
+        backup_path = os.path.join(BACKUP_DIR, normalized_name)
+        backup_dir_real = Path(BACKUP_DIR).resolve()
+        backup_path_real = Path(backup_path).resolve()
+        if backup_dir_real not in backup_path_real.parents and backup_path_real != backup_dir_real:
+            logger.warning(
+                f"⚠️ 경로 탈출 시도 차단 - 요청 경로: {backup_path_real}, 허용 경로: {backup_dir_real}"
+            )
+            raise HTTPException(status_code=403, detail="잘못된 파일 경로입니다")
+
+        # 파일 존재 확인
         if not os.path.exists(backup_path):
             raise HTTPException(status_code=404, detail="백업 파일을 찾을 수 없습니다")
-        
-        logger.info(f"✅ download_backup 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {backup_filename}")
-        
+
+        logger.info(
+            f"✅ download_backup 완료 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {normalized_name}"
+        )
+
         return FileResponse(
             path=backup_path,
-            filename=backup_filename,
+            filename=normalized_name,
             media_type='application/zip'
         )
-        
+
+    except HTTPException:
+        # 명시적으로 발생시킨 HTTP 오류는 그대로 전달
+        raise
     except Exception as e:
-        logger.error(f"❌ download_backup 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {backup_filename}, 에러: {str(e)}")
+        logger.error(
+            f"❌ download_backup 오류 - 조직: {current_org_id}, 사용자: {current_user.email}, 파일: {backup_filename}, 에러: {str(e)}"
+        )
         raise HTTPException(status_code=500, detail=f"백업 파일 다운로드 중 오류가 발생했습니다: {str(e)}")
 
 
