@@ -27,8 +27,7 @@ from app.model.user_model import User
 from app.model.organization_model import Organization
 from app.database.user import get_db
 
-router = APIRouter(prefix="/push-notifications", tags=["Push Notifications"])
-
+router = APIRouter()
 
 @router.post("/subscribe", summary="푸시 알림 구독")
 async def subscribe_to_notifications(

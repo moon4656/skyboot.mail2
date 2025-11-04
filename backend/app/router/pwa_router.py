@@ -23,7 +23,7 @@ from app.model.user_model import User
 from app.model.organization_model import Organization
 from app.database.user import get_db
 
-router = APIRouter(prefix="/pwa", tags=["PWA"])
+router = APIRouter()
 
 
 @router.get("/manifest", summary="PWA 매니페스트 조회")

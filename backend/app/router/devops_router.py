@@ -27,11 +27,7 @@ from ..schemas.devops_schema import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/devops",
-    tags=["DevOps"],
-    responses={404: {"description": "Not found"}}
-)
+router = APIRouter()
 
 def get_devops_service(db: Session = Depends(get_db)) -> DevOpsService:
     """DevOps 서비스 의존성 주입"""

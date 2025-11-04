@@ -78,9 +78,9 @@ class TenantMiddleware(BaseHTTPMiddleware):
         self.excluded_paths = excluded_paths or [
             "/docs", "/redoc", "/openapi.json", "/favicon.ico",
             "/static", "/health", "/info", "/api/system",
-            "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/organizations/create",
+            "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/organizations/create"
             # "/api/v1/addressbook",  # 주석 처리: 조직 ID가 필요한 엔드포인트이므로 테넌트 검증 필요
-            "/api/v1/test-csv"      # 임시로 test-csv 경로 제외 (테스트용)
+            # 테스트용 제외 경로였던 "/api/v1/test-csv"는 조직 컨텍스트가 필요하므로 제외하지 않음
         ]
         self.default_org_code = default_org_code
         logger.info("🏢 통합 테넌트 미들웨어 초기화 완료")

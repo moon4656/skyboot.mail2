@@ -26,11 +26,7 @@ from app.middleware.tenant_middleware import get_current_user, get_current_organ
 logger = logging.getLogger(__name__)
 
 # 라우터 생성
-router = APIRouter(
-    prefix="/ews",
-    tags=["Exchange Web Services"],
-    responses={404: {"description": "Not found"}}
-)
+router = APIRouter()
 
 
 @router.post("/Exchange.asmx", summary="EWS 메인 엔드포인트")

@@ -24,8 +24,7 @@ from app.model.user_model import User
 from app.model.organization_model import Organization
 from app.database.user import get_db
 
-router = APIRouter(prefix="/offline", tags=["Offline"])
-
+router = APIRouter()
 
 @router.post("/actions", summary="오프라인 액션 큐에 추가")
 async def queue_offline_action(

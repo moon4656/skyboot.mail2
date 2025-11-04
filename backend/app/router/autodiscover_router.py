@@ -22,11 +22,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # 라우터 생성
-router = APIRouter(
-    prefix="/autodiscover",
-    tags=["Autodiscover"],
-    responses={404: {"description": "Not found"}}
-)
+router = APIRouter()
 
 
 @router.post("/autodiscover.xml", summary="Outlook Autodiscover 설정 제공")

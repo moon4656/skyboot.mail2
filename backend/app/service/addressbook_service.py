@@ -1,6 +1,7 @@
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, func
+from sqlalchemy.exc import IntegrityError
 
 from ..model.addressbook_model import Contact, Group, ContactGroup, Department
 
@@ -87,11 +88,51 @@ class AddressBookService:
         contact = db.query(Contact).filter(Contact.org_id == org_id, Contact.contact_uuid == contact_uuid).first()
         if not contact:
             return None
-        for k, v in data.items():
-            setattr(contact, k, v)
-        db.commit()
-        db.refresh(contact)
-        return contact
+
+        # 부서 ID 유효성 검사 및 정규화 (0, 음수는 루트로 간주)
+        if "department_id" in data:
+            dept_id = data["department_id"]
+            if dept_id is not None:
+                try:
+                    dept_id_int = int(dept_id)
+                except Exception:
+                    raise ValueError(f"유효하지 않은 부서 ID입니다: {dept_id}")
+                if dept_id_int <= 0:
+                    data["department_id"] = None
+                else:
+                    dept = db.query(Department).filter(
+                        Department.org_id == org_id,
+                        Department.id == dept_id_int
+                    ).first()
+                    if not dept:
+                        raise ValueError(f"유효하지 않은 부서 ID입니다: {dept_id}")
+                    data["department_id"] = dept_id_int
+
+        # 이메일 중복 검사 (다른 연락처와 중복 여부 확인)
+        if "email" in data and data["email"]:
+            existing = db.query(Contact).filter(
+                Contact.org_id == org_id,
+                Contact.email == data["email"],
+                Contact.contact_uuid != contact_uuid
+            ).first()
+            if existing:
+                raise ValueError(f"이미 존재하는 이메일입니다: {data['email']}")
+
+        try:
+            for k, v in data.items():
+                setattr(contact, k, v)
+            db.commit()
+            db.refresh(contact)
+            return contact
+        except IntegrityError as e:
+            db.rollback()
+            msg = str(e)
+            if "unique_org_contact_email" in msg or "unique" in msg.lower():
+                raise ValueError(f"이미 존재하는 이메일입니다: {data.get('email', 'Unknown')}")
+            raise ValueError(f"연락처 수정 중 오류가 발생했습니다: {msg}")
+        except Exception as e:
+            db.rollback()
+            raise ValueError(f"연락처 수정 중 오류가 발생했습니다: {str(e)}")
 
     @staticmethod
     def delete_contact(db: Session, org_id: str, contact_uuid: str) -> bool:
@@ -170,10 +211,21 @@ class AddressBookService:
 
     @staticmethod
     def add_contact_to_group(db: Session, org_id: str, contact_uuid: str, group_id: int) -> bool:
-        contact = db.query(Contact).filter(Contact.org_id == org_id, Contact.contact_uuid == contact_uuid).first()
-        group = db.query(Group).filter(Group.org_id == org_id, Group.id == group_id).first()
-        if not contact or not group:
-            return False
+        # 정밀 검증: 연락처/그룹 존재 및 조직 일치 여부 확인
+        contact = db.query(Contact).filter(Contact.contact_uuid == contact_uuid).first()
+        if not contact:
+            raise ValueError(f"연락처를 찾을 수 없습니다: {contact_uuid}")
+        if contact.org_id != org_id:
+            raise ValueError("현재 조직에 속하지 않은 연락처입니다")
+
+        # 그룹은 ID로 먼저 확인 후 조직 일치 검증
+        group_any = db.query(Group).filter(Group.id == group_id).first()
+        if not group_any:
+            raise ValueError(f"그룹을 찾을 수 없습니다: {group_id}")
+        if group_any.org_id != org_id:
+            raise ValueError("현재 조직에 속하지 않은 그룹입니다")
+
+        # 동일 링크 존재시 멱등 처리
         exists = db.query(ContactGroup).filter(
             ContactGroup.org_id == org_id,
             ContactGroup.contact_uuid == contact_uuid,
@@ -182,9 +234,13 @@ class AddressBookService:
         if exists:
             return True
         link = ContactGroup(org_id=org_id, contact_uuid=contact_uuid, group_id=group_id)
-        db.add(link)
-        db.commit()
-        return True
+        try:
+            db.add(link)
+            db.commit()
+            return True
+        except Exception as e:
+            db.rollback()
+            raise ValueError(f"연락처를 그룹에 추가 중 오류가 발생했습니다: {str(e)}")
 
     @staticmethod
     def remove_contact_from_group(db: Session, org_id: str, contact_uuid: str, group_id: int) -> bool:

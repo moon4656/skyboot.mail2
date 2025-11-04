@@ -5,6 +5,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from pydantic import field_validator
 
 
 class AuditActionType(str, Enum):
@@ -128,12 +129,63 @@ class UsageRequest(BaseModel):
     period: Optional[str] = "daily"
     include_trends: bool = True
 
+    @field_validator("start_date", "end_date", mode="before")
+    def _parse_date(cls, v):
+        """
+        날짜 입력을 유연하게 파싱합니다.
+        - 지원 형식: YYYY-MM-DD, YYYY/MM/DD, YYYYMMDD, ISO datetime 문자열
+        - datetime 입력은 date로 변환합니다.
+        """
+        if v is None:
+            return None
+        if isinstance(v, date) and not isinstance(v, datetime):
+            return v
+        if isinstance(v, datetime):
+            return v.date()
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return None
+            try:
+                # YYYYMMDD
+                if len(s) == 8 and s.isdigit():
+                    return datetime.strptime(s, "%Y%m%d").date()
+                # YYYY-MM-DD
+                if len(s) == 10 and s[4] == "-" and s[7] == "-":
+                    return datetime.strptime(s, "%Y-%m-%d").date()
+                # YYYY/MM/DD
+                if len(s) == 10 and s[4] == "/" and s[7] == "/":
+                    return datetime.strptime(s, "%Y/%m/%d").date()
+                # ISO datetime 문자열 처리 (예: 2025-10-25T12:34:56Z)
+                iso = s.replace("Z", "+00:00")
+                return datetime.fromisoformat(iso).date()
+            except Exception:
+                raise ValueError("날짜 형식이 올바르지 않습니다. YYYY-MM-DD 또는 YYYYMMDD 형식을 사용하세요.")
+        # 그 외 타입은 그대로 반환 (pydantic에 위임)
+        return v
+
 
 class AuditRequest(BaseModel):
     """감사 로그 요청"""
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    action_type: Optional[AuditActionType] = None
+    action_type: Optional[AuditActionType] = Field(
+        None,
+        description="필터링할 액션 타입",
+        json_schema_extra={
+            "examples": [
+                "login",
+                "logout",
+                "send_email",
+                "read_email",
+                "delete_email",
+                "create_user",
+                "update_user",
+                "delete_user",
+                "update_settings"
+            ]
+        }
+    )
     user_email: Optional[str] = None
     page: int = 1
     page_size: int = 20

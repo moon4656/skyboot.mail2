@@ -28,11 +28,7 @@ from app.schemas.mail_schema import MailSendRequest
 logger = logging.getLogger(__name__)
 
 # 라우터 생성
-router = APIRouter(
-    prefix="/graph",
-    tags=["Microsoft Graph API"],
-    responses={404: {"description": "Not found"}}
-)
+router = APIRouter()
 
 # Microsoft Graph API 설정
 GRAPH_API_BASE_URL = "https://graph.microsoft.com/v1.0"

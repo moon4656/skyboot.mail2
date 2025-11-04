@@ -1,0 +1,31 @@
+{
+  "organization_id": "3856a8c1-84a4-4019-9133-655cacab4bc9",
+  "format": "json",
+  "languages": [
+    "ko"
+  ],
+  "namespaces": [
+    "common"
+  ],
+  "translations": {
+    "ko": {
+      "common": {
+        "welcome": "환영합니다",
+        "login": "로그인",
+        "logout": "로그아웃",
+        "email": "이메일",
+        "password": "비밀번호",
+        "submit": "제출",
+        "cancel": "취소",
+        "save": "저장",
+        "delete": "삭제",
+        "edit": "편집",
+        "search": "검색",
+        "loading": "로딩 중...",
+        "error": "오류",
+        "success": "성공"
+      }
+    }
+  },
+  "generated_at": "2025-11-04T15:49:43.841373"
+}

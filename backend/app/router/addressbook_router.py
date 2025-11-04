@@ -8,6 +8,7 @@ import io
 from ..database.user import get_db
 from ..middleware.tenant_middleware import get_current_org_id
 from ..service.addressbook_service import AddressBookService
+from ..model.addressbook_model import Contact
 from ..service.auth_service import get_current_user, logger
 from ..model.user_model import User
 from ..schemas.addressbook_schema import (
@@ -168,25 +169,34 @@ def get_contact(contact_uuid: str, db: Session = Depends(get_db), org_id: str = 
 
 @router.put("/contacts/{contact_uuid}", response_model=ContactOut, summary="연락처 수정")
 def update_contact(contact_uuid: str, body: ContactUpdate, db: Session = Depends(get_db), org_id: str = Depends(get_current_org_id), current_user: User = Depends(get_current_user)):
-    contact = AddressBookService.update_contact(db, org_id, contact_uuid, body.dict(exclude_unset=True))
-    if not contact:
-        raise HTTPException(status_code=404, detail="연락처를 찾을 수 없습니다")
-    groups = [GroupOut.from_orm(link.group) for link in contact.group_links]
-    return ContactOut(
-        contact_uuid=contact.contact_uuid,
-        name=contact.name,
-        email=contact.email,
-        phone=contact.phone,
-        mobile=contact.mobile,
-        company=contact.company,
-        title=contact.title,
-        department_id=contact.department_id,
-        address=contact.address,
-        memo=contact.memo,
-        favorite=contact.favorite,
-        profile_image_url=contact.profile_image_url,
-        groups=groups
-    )
+    try:
+        contact = AddressBookService.update_contact(db, org_id, contact_uuid, body.dict(exclude_unset=True))
+        if not contact:
+            raise HTTPException(status_code=404, detail="연락처를 찾을 수 없습니다")
+        groups = [GroupOut.from_orm(link.group) for link in contact.group_links]
+        return ContactOut(
+            contact_uuid=contact.contact_uuid,
+            name=contact.name,
+            email=contact.email,
+            phone=contact.phone,
+            mobile=contact.mobile,
+            company=contact.company,
+            title=contact.title,
+            department_id=contact.department_id,
+            address=contact.address,
+            memo=contact.memo,
+            favorite=contact.favorite,
+            profile_image_url=contact.profile_image_url,
+            groups=groups
+        )
+    except Exception as e:
+        msg = str(e)
+        if "이미 존재하는 이메일" in msg:
+            raise HTTPException(status_code=409, detail=msg)
+        elif "유효하지 않은 부서 ID" in msg:
+            raise HTTPException(status_code=400, detail=msg)
+        else:
+            raise HTTPException(status_code=400, detail=f"연락처 수정 실패: {msg}")
 
 
 @router.delete("/contacts/{contact_uuid}", summary="연락처 삭제")
@@ -266,10 +276,21 @@ def delete_group(group_id: int, db: Session = Depends(get_db), org_id: str = Dep
 
 @router.post("/contacts/{contact_uuid}/groups/{group_id}", summary="연락처를 그룹에 추가")
 def add_to_group(contact_uuid: str, group_id: int, db: Session = Depends(get_db), org_id: str = Depends(get_current_org_id), current_user: User = Depends(get_current_user)):
-    ok = AddressBookService.add_contact_to_group(db, org_id, contact_uuid, group_id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="연락처/그룹을 찾을 수 없습니다")
-    return {"success": True}
+    try:
+        ok = AddressBookService.add_contact_to_group(db, org_id, contact_uuid, group_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="연락처/그룹을 찾을 수 없습니다")
+        return {"success": True}
+    except Exception as e:
+        msg = str(e)
+        # 조직 불일치는 권한 문제로 간주 (403)
+        if "현재 조직에 속하지 않은" in msg:
+            raise HTTPException(status_code=403, detail=msg)
+        # 리소스 미존재는 404로 매핑
+        elif "연락처를 찾을 수 없습니다" in msg or "그룹을 찾을 수 없습니다" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        # 기타 오류는 400으로 매핑
+        raise HTTPException(status_code=400, detail=f"그룹 추가 실패: {msg}")
 
 
 @router.delete("/contacts/{contact_uuid}/groups/{group_id}", summary="연락처를 그룹에서 제거")
@@ -369,46 +390,152 @@ def delete_department(
 
 
 @router.post("/contacts/import", summary="연락처 CSV 가져오기")
-async def import_contacts(file: UploadFile = File(...), db: Session = Depends(get_db), org_id: str = Depends(get_current_org_id), current_user: User = Depends(get_current_user)):
+async def import_contacts(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    org_id: str = Depends(get_current_org_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    CSV 파일에서 연락처를 일괄 생성합니다.
+
+    - 오류가 발생한 행은 건너뛰고, 오류 내역을 함께 반환합니다.
+    - 허용 필드: name, email, phone, mobile, company, title, department_id, address, memo, favorite, profile_image_url
+    """
     content = await file.read()
     text = content.decode("utf-8")
     reader = csv.DictReader(io.StringIO(text))
-    count = 0
-    for row in reader:
-        data = {
-            "name": row.get("name") or "",
-            "email": row.get("email") or None,
-            "phone": row.get("phone") or None,
-            "mobile": row.get("mobile") or None,
-            "company": row.get("company") or None,
-            "title": row.get("title") or None,
-            "address": row.get("address") or None,
-        }
-        AddressBookService.create_contact(db, org_id, data)
-        count += 1
-    return {"success": True, "imported": count}
+
+    imported = 0
+    errors: list[dict] = []
+
+    for idx, row in enumerate(reader, start=2):  # 1행은 헤더이므로 데이터는 2행부터
+        try:
+            # 입력 정규화
+            name = (row.get("name") or "").strip()
+            email = (row.get("email") or None)
+            email = email.strip().lower() if isinstance(email, str) and email.strip() else None
+
+            # 선택 필드 파싱
+            department_raw = row.get("department_id")
+            try:
+                department_id = int(department_raw) if department_raw not in (None, "",) else None
+                if department_id is not None and department_id <= 0:
+                    department_id = None
+            except Exception:
+                department_id = None
+
+            favorite_raw = row.get("favorite")
+            favorite = False
+            if isinstance(favorite_raw, str):
+                favorite = favorite_raw.strip().lower() in ("true", "1", "yes", "y")
+
+            data = {
+                "name": name,
+                "email": email,
+                "phone": (row.get("phone") or None),
+                "mobile": (row.get("mobile") or None),
+                "company": (row.get("company") or None),
+                "title": (row.get("title") or None),
+                "department_id": department_id,
+                "address": (row.get("address") or None),
+                "memo": (row.get("memo") or None),
+                "favorite": favorite,
+                "profile_image_url": (row.get("profile_image_url") or None),
+            }
+
+            AddressBookService.create_contact(db, org_id, data)
+            imported += 1
+
+        except Exception as e:
+            msg = str(e)
+            # 중복 이메일/유효성 오류 등 모든 예외를 수집하고 다음 행 처리 지속
+            logger.warning(f"⚠️ CSV 행 처리 실패 (row={idx}) - {msg}")
+            errors.append({
+                "row": idx,
+                "name": row.get("name"),
+                "email": row.get("email"),
+                "error": msg
+            })
+
+    return {
+        "success": True,
+        "imported": imported,
+        "failed": len(errors),
+        "errors": errors
+    }
 
 
 # Import from organization users
 @router.post("/contacts/import-from-organization", summary="조직 사용자로부터 연락처 생성")
-def import_from_org(db: Session = Depends(get_db), org_id: str = Depends(get_current_org_id), current_user: User = Depends(get_current_user)):
+def import_from_org(
+    db: Session = Depends(get_db),
+    org_id: str = Depends(get_current_org_id),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    현재 조직의 사용자 목록에서 이메일을 가진 사용자들을 연락처로 생성합니다.
+
+    - 이미 존재하는 이메일은 건너뛰며, 오류는 수집하여 함께 반환합니다.
+    - 이메일은 소문자/공백 제거로 정규화하여 중복을 판정합니다.
+    """
     from ..model.user_model import User
+
+    # 기존 연락처 이메일(정규화) 수집
     existing_emails = set(
-        e for e, in db.query(Contact.email).filter(Contact.org_id == org_id, Contact.email.isnot(None)).all()
+        (e.strip().lower())
+        for e, in db.query(Contact.email).filter(Contact.org_id == org_id, Contact.email.isnot(None)).all()
+        if isinstance(e, str) and e.strip()
     )
+
     users = db.query(User).filter(User.org_id == org_id).all()
     created = 0
+    skipped_no_email = 0
+    skipped_duplicate = 0
+    errors: list[dict] = []
+
+    # 동일 실행 내 중복 방지용 (사용자 간 중복)
+    seen_emails = set(existing_emails)
+
     for u in users:
-        email = u.email
-        if email and email not in existing_emails:
-            AddressBookService.create_contact(db, org_id, {
-                "name": u.username,
-                "email": u.email,
+        try:
+            raw_email = getattr(u, "email", None)
+            email = (raw_email.strip().lower()) if isinstance(raw_email, str) and raw_email.strip() else None
+            if not email:
+                skipped_no_email += 1
+                continue
+            if email in seen_emails:
+                skipped_duplicate += 1
+                continue
+
+            data = {
+                "name": getattr(u, "username", "") or "",
+                "email": email,
                 "company": None,
                 "title": None
-            })
+            }
+
+            AddressBookService.create_contact(db, org_id, data)
             created += 1
-    return {"success": True, "created": created}
+            seen_emails.add(email)
+
+        except Exception as e:
+            msg = str(e)
+            errors.append({
+                "user_id": getattr(u, "id", None),
+                "username": getattr(u, "username", None),
+                "email": getattr(u, "email", None),
+                "error": msg
+            })
+
+    return {
+        "success": True,
+        "created": created,
+        "skipped_no_email": skipped_no_email,
+        "skipped_duplicate": skipped_duplicate,
+        "failed": len(errors),
+        "errors": errors
+    }
 
 
 # 테스트용 간단한 CSV 엔드포인트 (인증 없음)

@@ -26,6 +26,7 @@ from app.router.pwa_router import router as pwa_router
 from app.router.offline_router import router as offline_router
 from app.router.push_notification_router import router as push_notification_router
 from app.router.devops_router import router as devops_router
+from app.router.compat_router import router as compat_router
 
 # Outlook 연동 라우터
 from app.router.autodiscover_router import router as autodiscover_router
@@ -264,13 +265,18 @@ app.include_router(test_csv_router, prefix=f"{api_prefix}/test-csv", tags=["테�
 app.include_router(monitoring_router, prefix=f"{api_prefix}", tags=["모니터링"])
 
 # 국제화, 브랜딩, PWA, 오프라인, 푸시 알림 라우터 등록
-app.include_router(i18n_router, prefix=f"{api_prefix}", tags=["국제화"])
-app.include_router(theme_router, prefix=f"{api_prefix}", tags=["조직 테마"])
+# 경로 충돌 방지를 위해 세부 프리픽스를 명확히 분리
+app.include_router(i18n_router, prefix=f"{api_prefix}/i18n", tags=["국제화"])
+app.include_router(theme_router, prefix=f"{api_prefix}/themes", tags=["조직 테마"])
 app.include_router(pwa_router, prefix=f"{api_prefix}", tags=["PWA"])
 app.include_router(offline_router, prefix=f"{api_prefix}", tags=["오프라인"])
 app.include_router(push_notification_router, prefix=f"{api_prefix}", tags=["푸시 알림"])
 app.include_router(devops_router, prefix=f"{api_prefix}", tags=["DevOps"])
 logger.info("🛠️ DevOps 라우터 등록 완료")
+
+# 호환 라우터 등록 (기존 경로 유지 목적)
+app.include_router(compat_router, prefix=f"{api_prefix}", tags=["호환"])
+logger.info("♻️ 호환 라우터 등록 완료 (/api/v1/user/preference)")
 
 # Outlook 연동 라우터 등록
 app.include_router(autodiscover_router, prefix="", tags=["Outlook Autodiscover"])

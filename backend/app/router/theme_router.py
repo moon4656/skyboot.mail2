@@ -24,8 +24,7 @@ from app.model.user_model import User
 from app.model.organization_model import Organization
 from app.database.user import get_db
 
-router = APIRouter(prefix="/themes", tags=["조직별 테마"])
-
+router = APIRouter()
 
 @router.get("/", summary="조직 테마 목록 조회")
 async def get_organization_themes(

@@ -25,11 +25,7 @@ from ..schemas.user_schema import MessageResponse
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/monitoring",
-    tags=["monitoring"],
-    responses={404: {"description": "Not found"}}
-)
+router = APIRouter()
 
 
 @router.get("/usage", response_model=UsageResponse, summary="사용량 통계 조회")
@@ -92,13 +88,7 @@ async def get_usage_statistics(
            summary="조직별 감사 로그 조회",
            description="조직의 사용자 활동, 메일 처리, 시스템 접근 등의 감사 로그를 조회합니다.")
 async def get_audit_logs(
-    start_date: Optional[datetime] = Query(None, description="시작 날짜시간"),
-    end_date: Optional[datetime] = Query(None, description="종료 날짜시간"),
-    action: Optional[AuditActionType] = Query(None, description="필터링할 액션 타입"),
-    user_id: Optional[str] = Query(None, description="필터링할 사용자 ID"),
-    resource_type: Optional[str] = Query(None, description="필터링할 리소스 타입"),
-    page: int = Query(1, ge=1, description="페이지 번호"),
-    limit: int = Query(50, ge=1, le=1000, description="페이지당 항목 수"),
+    request: AuditRequest = Depends(),
     current_user: User = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
@@ -137,27 +127,16 @@ async def get_audit_logs(
                 detail="감사 로그 조회 권한이 없습니다. 관리자만 접근 가능합니다."
             )
         
-        # 요청 객체 생성
-        audit_request = AuditRequest(
-            start_date=start_date,
-            end_date=end_date,
-            action=action,
-            user_id=user_id,
-            resource_type=resource_type,
-            page=page,
-            limit=limit
-        )
-        
         # 모니터링 서비스 초기화
         monitoring_service = MonitoringService(db)
         
         # 감사 로그 조회
         audit_logs = monitoring_service.get_audit_logs(
             org_id=current_user.org_id,
-            request=audit_request
+            request=request
         )
         
-        logger.info(f"✅ 감사 로그 조회 완료 - 조직: {current_user.org_id}, 총 {audit_logs.total}개")
+        logger.info(f"✅ 감사 로그 조회 완료 - 조직: {current_user.org_id}, 총 {audit_logs.total_count}개")
         return audit_logs
         
     except HTTPException:

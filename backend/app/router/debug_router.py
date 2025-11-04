@@ -43,10 +43,7 @@ class UserCreateRequest(BaseModel):
 logger = logging.getLogger(__name__)
 
 # 라우터 생성
-router = APIRouter(
-    prefix="/debug",
-    responses={404: {"description": "디버그 정보를 찾을 수 없습니다"}}
-)
+router = APIRouter()
 
 
 @router.get("/dashboard-test", summary="대시보드 테스트 데이터")
